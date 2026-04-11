@@ -109,6 +109,7 @@ async def search_judgments(
     year_to: int = 0,
     case_word: str = "",
     case_number: str = "",
+    main_text: str = "",
     max_results: int = 10,
 ) -> dict:
     """搜尋司法院裁判書系統。
@@ -120,14 +121,27 @@ async def search_judgments(
     例如查「114年度上易字第503號」→ case_word="上易", case_number="503", year_from=114。
     keyword 僅用於主題式全文檢索（如「預售屋 遲延交屋」）。
 
+    【進階實務研究欄位】:
+    - main_text: 裁判主文關鍵字 — 最有效的輸贏方篩選方式。
+      主文措辭高度制度化（依民刑訴訟法條生成），substring match 接近
+      解析半結構化欄位，精度高：
+        * 「被告應將 移轉」→ 被告敗訴（物權移轉類）
+        * 「被告應給付」→ 被告敗訴（金錢給付類）
+        * 「原告之訴駁回」→ 原告敗訴
+        * 「上訴駁回」→ 維持原審
+    可與 keyword 併用，例：
+        找「借名登記成立、被告敗訴」→
+        main_text="被告應將 移轉", keyword="借名登記", case_type="民事"
+
     Args:
-        keyword: 全文檢索關鍵字（如「定型化契約 顯失公平」），查特定案號時不要用此欄位
+        keyword: 全文檢索關鍵字（對應 jud_kw）
         court: 法院名稱（如「最高法院」「臺灣高等法院」「臺灣臺北地方法院」）
         case_type: 案件類型（民事/刑事/行政/懲戒）
         year_from: 起始年度（民國年，如 110）
         year_to: 截止年度（民國年，如 113）
         case_word: 字別（如「台上」「上易」「重訴」），查特定案號時必填
         case_number: 案號（數字），查特定案號時必填
+        main_text: 裁判主文關鍵字（對應 jud_jmain）— 結構化篩選輸贏方
         max_results: 回傳筆數上限（預設 10，上限 200）
 
     Returns:
@@ -136,8 +150,9 @@ async def search_judgments(
     # 硬上限防止 OOM（100 頁 × 20 筆 = 2000 筆，但實務上 200 已足夠）
     max_results = min(max_results, 200)
     logger.info("search_judgments: keyword=%r, court=%r, case_type=%r, "
-                "year=%s~%s, case_word=%r, case_number=%r",
-                keyword, court, case_type, year_from, year_to, case_word, case_number)
+                "year=%s~%s, case_word=%r, case_number=%r, main_text=%r",
+                keyword, court, case_type, year_from, year_to,
+                case_word, case_number, main_text)
     result = await jud_browser.search(
         keyword=keyword,
         court=court,
@@ -146,6 +161,7 @@ async def search_judgments(
         year_to=year_to,
         case_word=case_word,
         case_number=case_number,
+        main_text=main_text,
         max_results=max_results,
     )
     logger.info("search_judgments 完成: success=%s, count=%s, cached=%s",

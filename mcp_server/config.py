@@ -1,5 +1,29 @@
 """MCP Server 設定管理"""
 
+# ──────────────────────────────────────────────────────────
+# OS-native SSL trust store (must run before any `import ssl` / `import httpx`)
+# ──────────────────────────────────────────────────────────
+# Background: judgment.judicial.gov.tw and law.moj.gov.tw chain up to
+# TWCA Global Root CA, a 2012 root that lacks the X509v3 Subject Key
+# Identifier extension. OpenSSL 3.6+ (shipped by Homebrew Python 3.13,
+# Fedora 40+, upcoming Linux LTS) enforces RFC 5280 strict CA validation
+# and rejects this chain with "Missing Subject Key Identifier". OpenSSL
+# <3.6 (Ubuntu 22.04, Debian 12, etc.) still accepts it.
+#
+# `truststore` (PyPA project) makes Python use the OS native trust store
+# for SSL verification instead of the certifi Mozilla bundle:
+#   - macOS → Security framework (LibreSSL-family, lenient)
+#   - Windows → CryptoAPI / schannel (lenient)
+#   - Linux → still OpenSSL-based; 3.6+ still rejects, but this gives us
+#             a uniform code path and can be complemented by Playwright
+#             fallback (already present in JudgmentDocClient).
+#
+# This preserves *full* SSL verification (verify=True) on macOS + Windows
+# and the majority of Linux installations. No `verify=False` is needed
+# anywhere in the codebase.
+import truststore
+truststore.inject_into_ssl()
+
 from pathlib import Path
 
 # 專案根目錄（相對於此檔案自動解析，不硬編碼路徑）

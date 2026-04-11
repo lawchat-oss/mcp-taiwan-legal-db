@@ -143,6 +143,9 @@ class RegulationClient:
 
     def __init__(self, cache: CacheDB):
         self.cache = cache
+        # SSL verification via OS-native trust store (truststore injected
+        # at config.py import time). See mcp_server/config.py for the
+        # TWCA Global Root CA + OpenSSL 3.6 rationale.
         self.client = httpx.AsyncClient(
             timeout=30.0,
             headers={"User-Agent": "TaiwanLegalMCP/1.0"},

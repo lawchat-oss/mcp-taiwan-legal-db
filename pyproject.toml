@@ -28,6 +28,11 @@ dependencies = [
     "aiosqlite>=0.20.0",
     "beautifulsoup4>=4.12.0",
     "lxml>=5.0.0",
+    # Use OS-native trust stores (Keychain / CryptoAPI / system ca-certs)
+    # instead of the certifi bundle. Required because TWCA Global Root CA
+    # in Mozilla's bundle lacks the Subject Key Identifier extension,
+    # which OpenSSL 3.6+ rejects. See mcp_server/config.py.
+    "truststore>=0.9.0",
 ]
 
 [project.optional-dependencies]

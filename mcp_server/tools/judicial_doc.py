@@ -23,6 +23,11 @@ class JudgmentDocClient:
 
     def __init__(self, cache: CacheDB):
         self.cache = cache
+        # SSL verification uses the OS-native trust store via truststore
+        # (see mcp_server/config.py top-of-file injection). Full strict
+        # verification is preserved on macOS / Windows / OpenSSL <3.6
+        # Linux. On OpenSSL 3.6+ Linux the httpx path still fails and
+        # falls back to Playwright below.
         self.http = httpx.AsyncClient(
             timeout=30.0,
             headers={"User-Agent": "TaiwanLegalMCP/1.0"},

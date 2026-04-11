@@ -81,9 +81,19 @@ class JudicialSearchBrowser:
         year_to: int = 0,
         case_word: str = "",
         case_number: str = "",
+        main_text: str = "",
         max_results: int = 10,
     ) -> dict:
-        """執行裁判書搜尋"""
+        """執行裁判書搜尋
+
+        main_text maps to the 進階搜尋 form field jud_jmain (裁判主文) and
+        filters by who won/lost via the operative part of the judgment,
+        which is highly canonical (driven by civil/criminal procedure code
+        templates) and therefore high-precision:
+            main_text="被告應將 移轉" + keyword="借名登記"
+            → cases where the defendant was ordered to transfer title,
+              i.e. the borrowed-registration claim succeeded.
+        """
         # 建構查詢參數（供快取 key 用）
         params = {
             "keyword": keyword,
@@ -93,6 +103,7 @@ class JudicialSearchBrowser:
             "year_to": year_to,
             "case_word": case_word,
             "case_number": case_number,
+            "main_text": main_text,
         }
 
         # 快取查詢
@@ -101,10 +112,10 @@ class JudicialSearchBrowser:
             cached["cached"] = True
             return cached
 
-        if not keyword and not case_number:
+        if not keyword and not case_number and not main_text:
             return {
                 "success": False,
-                "error": "至少需要提供關鍵字(keyword)或案號(case_number)",
+                "error": "至少需要提供 keyword / case_number / main_text 其一",
                 "query": params,
             }
 
@@ -207,6 +218,8 @@ class JudicialSearchBrowser:
             sys_codes = ["V", "M", "A"]
 
         try:
+            # SSL verification via OS-native trust store (truststore
+            # injected at config.py import time).
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(15.0),
                 follow_redirects=True,
@@ -281,7 +294,7 @@ class JudicialSearchBrowser:
         # 等表單實際可用
         await page.wait_for_selector("#btnQry", state="visible", timeout=15000)
 
-        # 填入關鍵字
+        # 填入關鍵字（全文內容 jud_kw）
         if params.get("keyword"):
             kw_input = page.locator("#jud_kw")
             if await kw_input.count() > 0:
@@ -291,6 +304,17 @@ class JudicialSearchBrowser:
                 kw_input = page.locator("input[name='jud_kw']") or page.locator("input[type='text']").first
                 if await kw_input.count() > 0:
                     await kw_input.fill(params["keyword"])
+
+        # 填入裁判主文（jud_jmain）— filters by who won/lost
+        # e.g. "被告應將" (defendant ordered to transfer), "原告之訴駁回" (plaintiff lost)
+        if params.get("main_text"):
+            main_input = page.locator("#jud_jmain")
+            if await main_input.count() == 0:
+                main_input = page.locator("input[name='jud_jmain']")
+            if await main_input.count() > 0:
+                await main_input.fill(params["main_text"])
+            else:
+                logger.warning("main_text field (#jud_jmain) not found, skipping")
 
         # 填入法院
         if params.get("court"):

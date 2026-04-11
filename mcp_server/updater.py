@@ -99,7 +99,14 @@ def update_pcode_all(output_path: Path | None = None) -> dict:
     law_count = 0
     order_count = 0
 
-    with httpx.Client(follow_redirects=True) as client:
+    # SSL verification via OS-native trust store (truststore injected at
+    # config.py import time). pcode_all.json is written to disk and
+    # trusted by the next startup, so strict verification matters here;
+    # with truststore we now get full verification on macOS / Windows /
+    # OpenSSL <3.6 Linux. On OpenSSL 3.6+ Linux this update will fail
+    # but the server still starts on the existing pcode_all.json shipped
+    # in the repo.
+    with httpx.Client(follow_redirects=True, verify=True) as client:
         # 下載法律
         laws = _fetch_and_parse(LAW_API_URL, client)
         logger.info("法律: %d 部", len(laws))

@@ -270,6 +270,9 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 **第一次查詢很慢**
 → 啟動時伺服器會在背景延遲啟動 Playwright（~12 秒）。第一次 `search_judgments` 關鍵字查詢若 warmup 還沒完成可能會卡一下。後續查詢會很快。
 
+**`ssl.SSLCertVerificationError: ... Missing Subject Key Identifier`**
+→ 這是 OpenSSL 3.6+ 對 TWCA Global Root CA 的廣泛 rejection，**不是 certifi 舊的問題**。TWCA Global Root CA 在 Mozilla bundle 裡的版本本體就缺 Subject Key Identifier 擴充，升 certifi 到最新也沒用。本 repo 透過 [`truststore`](https://github.com/sethmlarson/truststore) 套件讓 Python 改用作業系統原生的 trust store（macOS Security framework、Windows CryptoAPI、Linux 系統 CA），**所有路徑都保留完整 SSL 驗證（`verify=True`）**，不使用 `verify=False`。這在 macOS、Windows 以及 OpenSSL <3.6 的 Linux 都能正常工作。OpenSSL 3.6+ 的 Linux 環境（Fedora 40+、未來的 Ubuntu LTS）truststore 幫不上忙，但 `get_judgment` 有 Playwright fallback（用 Chromium 自己的 SSL stack）仍可運作；`query_regulation` 在那個環境會失敗，歡迎 issue 回報。
+
 ---
 
 ## 資料來源
