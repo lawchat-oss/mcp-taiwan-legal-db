@@ -58,3 +58,7 @@ include = ["mcp_server*"]
 
 [tool.setuptools.package-data]
 mcp_server = ["data/*.json"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["mcp_server/tests"]
