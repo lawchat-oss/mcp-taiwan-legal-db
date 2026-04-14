@@ -270,6 +270,9 @@ Any MCP client that follows the [Model Context Protocol specification](https://m
 **Slow first query**
 → On startup the server lazy-starts Playwright in the background (~12s). First `search_judgments` keyword call may block briefly if warmup hasn't finished. Subsequent calls are fast.
 
+**Search returns "搜尋累計超時 ... 停止分頁" (cumulative search timeout)**
+→ The total search budget defaults to 120 seconds (`config.py:SEARCH_GLOBAL_TIMEOUT`). Broad keywords (e.g. "契約") can paginate through many results. Mitigations: narrow the `keyword`, add `court` / `year_from` / `year_to` filters, or lower `max_results`. Partial results still return.
+
 ---
 
 ## Data sources
