@@ -42,8 +42,8 @@ async def _maybe_update_pcode_all():
         await loop.run_in_executor(None, update_pcode_all)
         reload_pcode_all()
         logger.info("pcode_all.json 更新完成")
-    except Exception as e:
-        logger.warning("pcode_all.json 更新失敗: %s", e)
+    except Exception:
+        logger.exception("pcode_all.json 更新失敗（將沿用既有資料）")
 
 
 @asynccontextmanager

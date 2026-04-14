@@ -14,6 +14,7 @@ from mcp_server.config import (
     PLAYWRIGHT_TIMEOUT,
     SEARCH_DELAY_MIN,
     SEARCH_DELAY_MAX,
+    SEARCH_GLOBAL_TIMEOUT,
     COURT_CODES,
     CASE_TYPE_CODES,
     validate_url_domain,
@@ -167,11 +168,28 @@ class JudicialSearchBrowser:
 
             return data
 
-        except Exception as e:
-            logger.error("搜尋失敗: %s", e)
+        except asyncio.TimeoutError:
+            logger.exception("搜尋逾時")
             return {
                 "success": False,
-                "error": str(e),
+                "error": "搜尋逾時，請稍後重試或縮小查詢範圍",
+                "query": params,
+                "timestamp": datetime.now().isoformat(),
+            }
+        except httpx.HTTPError:
+            logger.exception("搜尋連線錯誤")
+            return {
+                "success": False,
+                "error": "連線司法院系統失敗，請稍後重試",
+                "query": params,
+                "timestamp": datetime.now().isoformat(),
+            }
+        except Exception:
+            # 完整 traceback 進 log；對外只回通用訊息，避免內部細節（路徑、依賴版本）外洩
+            logger.exception("搜尋發生未預期錯誤")
+            return {
+                "success": False,
+                "error": "搜尋發生未預期錯誤，請查看 server log 取得詳細資訊",
                 "query": params,
                 "timestamp": datetime.now().isoformat(),
             }
@@ -399,6 +417,9 @@ class JudicialSearchBrowser:
         seen_jids: set[str] = set()
         page_num = 1
         MAX_PAGES = 100  # 每頁 20 筆 × 100 頁 = 2000 筆上限
+        # 全局超時：避免單次搜尋耗時超過 client (e.g. Claude) 容忍上限
+        loop = asyncio.get_running_loop()
+        search_start = loop.time()
 
         # 先找 iframe（搜尋結果在 iframe-data 中）
         iframe = page.frame(name="iframe-data")
@@ -408,6 +429,13 @@ class JudicialSearchBrowser:
             logger.warning("iframe-data 不存在，降級到主頁解析（分頁可能不可用）")
 
         while len(all_results) < max_results and page_num <= MAX_PAGES:
+            elapsed = loop.time() - search_start
+            if elapsed > SEARCH_GLOBAL_TIMEOUT:
+                logger.warning(
+                    "搜尋累計超時 %.1fs > %.1fs，停止分頁，回傳已收到 %d 筆",
+                    elapsed, SEARCH_GLOBAL_TIMEOUT, len(all_results),
+                )
+                break
             # 取得當前頁面內容
             target = iframe if iframe is not None else page
             try:

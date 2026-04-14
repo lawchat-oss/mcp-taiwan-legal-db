@@ -211,6 +211,6 @@ class JudgmentDocClient:
                 await page.close()
                 await context.close()
 
-        except Exception as e:
-            logger.error("Playwright 取得裁判書失敗: %s", e)
+        except Exception:
+            logger.exception("Playwright 取得裁判書失敗")
             return None

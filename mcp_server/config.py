@@ -46,6 +46,7 @@ CACHE_PCODE_TTL = 2592000      # 30 天
 # Playwright 設定
 PLAYWRIGHT_HEADLESS = True
 PLAYWRIGHT_TIMEOUT = 60000     # 60 秒（法院網站高負載時段可能較慢）
+SEARCH_GLOBAL_TIMEOUT = 120.0  # 秒；分頁累計上限，超過就回傳已收到的部分結果
 SEARCH_RATE_LIMIT = 5          # 每分鐘最多 5 次
 SEARCH_DELAY_MIN = 1.0         # 秒
 SEARCH_DELAY_MAX = 3.0         # 秒
