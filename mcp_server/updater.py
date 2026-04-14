@@ -1,7 +1,7 @@
 """從全國法規資料庫官方 API 更新 pcode_all.json（v2 含廢止標記）
 
 用法：
-    .venv/bin/python scripts/update_pcode_all.py
+    .venv/bin/python -m mcp_server.updater
 
 官方 API：
     - 法律：https://law.moj.gov.tw/api/Ch/Law/JSON（ZIP → ChLaw.json）
@@ -21,6 +21,10 @@ from datetime import datetime, time as dt_time, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from zoneinfo import ZoneInfo
+
+from mcp_server.ssl_setup import inject_os_trust_store
+
+inject_os_trust_store()
 
 import httpx
 
@@ -99,11 +103,11 @@ def update_pcode_all(output_path: Path | None = None) -> dict:
     law_count = 0
     order_count = 0
 
-    # SSL verification via OS-native trust store (truststore injected at
-    # config.py import time). pcode_all.json is written to disk and
+    # SSL verification via OS-native trust store. pcode_all.json is written
+    # to disk and
     # trusted by the next startup, so strict verification matters here;
     # with truststore we now get full verification on macOS / Windows /
-    # OpenSSL <3.6 Linux. On OpenSSL 3.6+ Linux this update will fail
+    # OpenSSL <3.6 Linux. On OpenSSL 3.6+ Linux this update will still fail
     # but the server still starts on the existing pcode_all.json shipped
     # in the repo.
     with httpx.Client(follow_redirects=True, verify=True) as client:

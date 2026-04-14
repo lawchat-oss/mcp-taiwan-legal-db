@@ -5,7 +5,6 @@
 """
 
 import asyncio
-from pathlib import Path
 
 import httpx
 import pytest
@@ -92,6 +91,57 @@ async def test_search_timeout_exception_gives_friendly_message(browser, monkeypa
     result = await browser.search(keyword="契約")
     assert result["success"] is False
     assert "逾時" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_precise_case_with_main_text_skips_http_fast_path(browser, monkeypatch):
+    """主文過濾存在時，不可走會忽略條件的精確案號 fast path"""
+    calls: list[str] = []
+
+    async def no_wait():
+        return None
+
+    class DummyPage:
+        async def close(self):
+            return None
+
+    class DummyContext:
+        async def new_page(self):
+            return DummyPage()
+
+        async def close(self):
+            return None
+
+    class DummyBrowser:
+        async def new_context(self, **kwargs):
+            return DummyContext()
+
+    async def ensure_browser(self):
+        self._browser = DummyBrowser()
+
+    async def precise_search(self, params, max_results):
+        calls.append("precise")
+        return [{"jid": "HTTP,1,2,3", "case_id": "http"}]
+
+    async def perform_search(self, page, params, max_results):
+        calls.append("perform")
+        assert params["main_text"] == "原告之訴駁回"
+        return [{"jid": "PW,1,2,3", "case_id": "playwright", "court_level": 1}]
+
+    monkeypatch.setattr(browser, "_rate_limit", no_wait)
+    monkeypatch.setattr(JudicialSearchBrowser, "_ensure_browser", ensure_browser)
+    monkeypatch.setattr(JudicialSearchBrowser, "_precise_search_http", precise_search)
+    monkeypatch.setattr(JudicialSearchBrowser, "_perform_search", perform_search)
+
+    result = await browser.search(
+        case_word="台上",
+        case_number="123",
+        main_text="原告之訴駁回",
+    )
+
+    assert result["success"] is True
+    assert [r["jid"] for r in result["results"]] == ["PW,1,2,3"]
+    assert calls == ["perform"]
 
 
 def test_global_timeout_constant_exists_and_reasonable():

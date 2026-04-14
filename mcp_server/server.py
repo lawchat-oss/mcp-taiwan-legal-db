@@ -147,6 +147,9 @@ async def search_judgments(
     Returns:
         包含搜尋結果的字典：success, query, total_count, results, cached, timestamp
     """
+    if max_results <= 0:
+        return {"success": False, "error": "max_results 必須大於 0"}
+
     # 硬上限防止 OOM（100 頁 × 20 筆 = 2000 筆，但實務上 200 已足夠）
     max_results = min(max_results, 200)
     logger.info("search_judgments: keyword=%r, court=%r, case_type=%r, "
@@ -343,6 +346,8 @@ async def search_regulations(keyword: str, offset: int = 0, exclude_abolished: b
     """
     if not keyword:
         return {"success": False, "error": "請提供搜尋關鍵字"}
+    if offset < 0:
+        return {"success": False, "error": "offset 不可為負數"}
 
     logger.info("search_regulations: keyword=%r, offset=%d, exclude_abolished=%s",
                 keyword, offset, exclude_abolished)

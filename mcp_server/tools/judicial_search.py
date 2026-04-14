@@ -121,7 +121,14 @@ class JudicialSearchBrowser:
             }
 
         # ── 精確案號搜尋：case_word + case_number → HTTP GET（快、準） ──
-        if params.get("case_word") and params.get("case_number"):
+        # 只有在沒有全文/主文過濾條件時才可安全走 fast path；
+        # 否則會忽略 keyword / main_text 並把錯結果寫進快取。
+        if (
+            params.get("case_word")
+            and params.get("case_number")
+            and not params.get("keyword")
+            and not params.get("main_text")
+        ):
             http_results = await self._precise_search_http(params, max_results)
             if http_results is not None:
                 data = {
