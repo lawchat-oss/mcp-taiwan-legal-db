@@ -14,9 +14,7 @@
 # for SSL verification instead of the certifi Mozilla bundle:
 #   - macOS → Security framework (LibreSSL-family, lenient)
 #   - Windows → CryptoAPI / schannel (lenient)
-#   - Linux → still OpenSSL-based; 3.6+ still rejects, but this gives us
-#             a uniform code path and can be complemented by Playwright
-#             fallback (already present in JudgmentDocClient).
+#   - Linux → still OpenSSL-based; 3.6+ may still reject on some distros.
 #
 # This preserves *full* SSL verification (verify=True) on macOS + Windows
 # and the majority of Linux installations. No `verify=False` is needed
@@ -43,9 +41,7 @@ CACHE_SEARCH_TTL = 86400       # 24 小時
 CACHE_REGULATION_TTL = 604800  # 7 天
 CACHE_PCODE_TTL = 2592000      # 30 天
 
-# Playwright 設定
-PLAYWRIGHT_HEADLESS = True
-PLAYWRIGHT_TIMEOUT = 60000     # 60 秒（法院網站高負載時段可能較慢）
+# 搜尋限速
 SEARCH_RATE_LIMIT = 5          # 每分鐘最多 5 次
 SEARCH_DELAY_MIN = 1.0         # 秒
 SEARCH_DELAY_MAX = 3.0         # 秒
@@ -127,7 +123,7 @@ PCODE_MAP = {
     "遺產及贈與稅法": "G0340072",
 }
 
-# 法院代碼對照表（用於 Playwright 搜尋，2026-02-14 自動抓取自 judicial.gov.tw）
+# 法院代碼對照表（2026-02-14 自動抓取自 judicial.gov.tw）
 COURT_CODES = {
     # 最高法院 / 特殊法院
     "憲法法庭": "JCC",

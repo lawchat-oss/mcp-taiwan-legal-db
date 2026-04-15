@@ -8,7 +8,7 @@ from mcp.server.fastmcp import FastMCP
 
 from mcp_server.cache.db import CacheDB
 from mcp_server.tools.regulations import RegulationClient
-from mcp_server.tools.judicial_search import JudicialSearchBrowser
+from mcp_server.tools.judicial_search import JudicialSearchClient
 from mcp_server.tools.judicial_doc import JudgmentDocClient
 from mcp_server.tools.regulations import (
     _PCODE_ALL, _PCODE_REVERSE, _ABOLISHED_SET,
@@ -25,7 +25,7 @@ logger = logging.getLogger("taiwan-legal-mcp")
 # 全域資源（lifespan 管理）
 cache: CacheDB | None = None
 reg_client: RegulationClient | None = None
-jud_browser: JudicialSearchBrowser | None = None
+jud_search: JudicialSearchClient | None = None
 jud_doc: JudgmentDocClient | None = None
 
 
@@ -49,7 +49,7 @@ async def _maybe_update_pcode_all():
 @asynccontextmanager
 async def lifespan(server: FastMCP):
     """伺服器生命週期：啟動時初始化，關閉時清理"""
-    global cache, reg_client, jud_browser, jud_doc
+    global cache, reg_client, jud_search, jud_doc
 
     # 啟動
     cache = CacheDB()
@@ -58,23 +58,10 @@ async def lifespan(server: FastMCP):
     await cache.cleanup_invalid_regulation_names()
 
     reg_client = RegulationClient(cache)
-    jud_browser = JudicialSearchBrowser(cache)
+    jud_search = JudicialSearchClient(cache)
     jud_doc = JudgmentDocClient(cache)
 
     logger.info("台灣法律資料庫 MCP Server 已啟動")
-
-    # Playwright 預熱 + pcode 更新移到 yield 後的背景 task
-    # 避免 12s Playwright 啟動 blocking handshake，導致 Claude Code 連線超時
-
-    async def _warmup():
-        try:
-            await jud_browser._ensure_browser()
-            logger.info("Playwright 背景預熱完成")
-        except Exception as e:
-            logger.warning("Playwright 背景預熱失敗（首次搜尋時重試）: %s", e)
-
-    _warmup_task = asyncio.create_task(_warmup())
-    _warmup_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
 
     _pcode_task = asyncio.create_task(_maybe_update_pcode_all())
     _pcode_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
@@ -82,7 +69,7 @@ async def lifespan(server: FastMCP):
 
     # 關閉
     await reg_client.close()
-    await jud_browser.close()
+    await jud_search.close()
     await jud_doc.close()
     await cache.close()
     logger.info("MCP Server 已關閉")
@@ -153,7 +140,7 @@ async def search_judgments(
                 "year=%s~%s, case_word=%r, case_number=%r, main_text=%r",
                 keyword, court, case_type, year_from, year_to,
                 case_word, case_number, main_text)
-    result = await jud_browser.search(
+    result = await jud_search.search(
         keyword=keyword,
         court=court,
         case_type=case_type,

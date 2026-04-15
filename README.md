@@ -31,10 +31,7 @@ python3 -m venv .venv
 .venv/bin/pip install --upgrade pip
 .venv/bin/pip install -e .
 
-# 3. 安裝 Playwright 瀏覽器（判決全文搜尋 + HTTP fallback 需要）
-.venv/bin/playwright install chromium
-
-# 4. 驗證伺服器可以啟動並註冊 5 個工具
+# 3. 驗證伺服器可以啟動並註冊 5 個工具
 .venv/bin/python -c "
 import asyncio
 from mcp_server.server import mcp
@@ -77,7 +74,7 @@ Tools: ['search_judgments', 'get_judgment', 'query_regulation', 'get_pcode', 'se
 搜尋司法院判決系統。支援：
 
 - **精確案號查詢**（快，HTTP GET）：設定 `case_word` + `case_number` + `year_from`
-- **全文關鍵字搜尋**（Playwright fallback）：設定 `keyword`
+- **全文關鍵字搜尋**：設定 `keyword`
 - 可依 `court`、`case_type`（民事／刑事／行政／懲戒）、`year_from`／`year_to` 過濾
 - 結果自動依法院層級排序（最高 → 高等 → 地方）
 
@@ -102,7 +99,7 @@ search_judgments(keyword="114年度台上字第3753號")
 
 - 輸入：`jid`（從 `search_judgments` 結果取得）或 `url`
 - 輸出：`{case_id, court, date, main_text, facts, reasoning, cited_statutes, cited_cases, full_text, source_url}`
-- 主要走 HTTP GET，失敗時 fallback 到 Playwright
+- HTTP GET data.aspx 取得全文
 - 結果快取 30 天
 
 ```python
@@ -255,9 +252,6 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 **`ModuleNotFoundError: No module named 'mcp_server'`**
 → 你沒有在 venv 裡面跑 `pip install -e .`。回到 Quick Start 步驟 2。
 
-**`playwright._impl._errors.Error: Executable doesn't exist`**
-→ 你跳過了 Quick Start 步驟 3。執行 `.venv/bin/playwright install chromium`。只有 `search_judgments` 用 `keyword`（全文）時需要這個；案號查詢是純 HTTP，不用 Playwright 也能跑。
-
 **`FileNotFoundError: data/pcode_all.json`**
 → 內建的 `mcp_server/data/pcode_all.json` 不見或被刪了。用 `git checkout mcp_server/data/pcode_all.json` 還原，或觸發重新下載：
 ```bash
@@ -267,11 +261,8 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 **MCP client 回報「伺服器啟動失敗」**
 → 直接跑 Quick Start 步驟 4 的驗證指令。若失敗，代表 import chain 壞了 — 看 traceback。若通過，問題在 MCP client 的啟動設定（路徑或 cwd 錯了）。
 
-**第一次查詢很慢**
-→ 啟動時伺服器會在背景延遲啟動 Playwright（~12 秒）。第一次 `search_judgments` 關鍵字查詢若 warmup 還沒完成可能會卡一下。後續查詢會很快。
-
 **`ssl.SSLCertVerificationError: ... Missing Subject Key Identifier`**
-→ 這是 OpenSSL 3.6+ 對 TWCA Global Root CA 的廣泛 rejection，**不是 certifi 舊的問題**。TWCA Global Root CA 在 Mozilla bundle 裡的版本本體就缺 Subject Key Identifier 擴充，升 certifi 到最新也沒用。本 repo 透過 [`truststore`](https://github.com/sethmlarson/truststore) 套件讓 Python 改用作業系統原生的 trust store（macOS Security framework、Windows CryptoAPI、Linux 系統 CA），**所有路徑都保留完整 SSL 驗證（`verify=True`）**，不使用 `verify=False`。這在 macOS、Windows 以及 OpenSSL <3.6 的 Linux 都能正常工作。OpenSSL 3.6+ 的 Linux 環境（Fedora 40+、未來的 Ubuntu LTS）truststore 幫不上忙，但 `get_judgment` 有 Playwright fallback（用 Chromium 自己的 SSL stack）仍可運作；`query_regulation` 在那個環境會失敗，歡迎 issue 回報。
+→ 這是 OpenSSL 3.6+ 對 TWCA Global Root CA 的廣泛 rejection，**不是 certifi 舊的問題**。本 repo 透過 [`truststore`](https://github.com/sethmlarson/truststore) 套件讓 Python 改用作業系統原生的 trust store（macOS Security framework、Windows CryptoAPI、Linux 系統 CA），**所有路徑都保留完整 SSL 驗證（`verify=True`）**，不使用 `verify=False`。這在 macOS、Windows 以及 OpenSSL <3.6 的 Linux 都能正常工作。OpenSSL 3.6+ 的 Linux 環境（Fedora 40+、未來的 Ubuntu LTS）目前可能仍有問題，歡迎 issue 回報。
 
 ---
 

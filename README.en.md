@@ -31,10 +31,7 @@ python3 -m venv .venv
 .venv/bin/pip install --upgrade pip
 .venv/bin/pip install -e .
 
-# 3. Install Playwright browser (needed for judgment keyword search + HTTP fallback)
-.venv/bin/playwright install chromium
-
-# 4. Verify the server starts and registers all 5 tools
+# 3. Verify the server starts and registers all 5 tools
 .venv/bin/python -c "
 import asyncio
 from mcp_server.server import mcp
@@ -77,7 +74,7 @@ Five MCP tools, all read-only, all hitting only public Taiwan government databas
 Searches the Judicial Yuan judgment system. Supports:
 
 - **Precise case number lookup** (fast, HTTP GET): set `case_word` + `case_number` + `year_from`
-- **Full-text keyword search** (Playwright fallback): set `keyword`
+- **Full-text keyword search**: set `keyword`
 - Filter by `court`, `case_type` (民事/刑事/行政/懲戒), `year_from`/`year_to`
 - Returns results auto-sorted by court authority (最高 → 高等 → 地方)
 
@@ -102,7 +99,7 @@ Fetches a single judgment's full structured text.
 
 - Input: `jid` (from `search_judgments` results) OR `url`
 - Output: `{case_id, court, date, main_text, facts, reasoning, cited_statutes, cited_cases, full_text, source_url}`
-- Uses HTTP GET primarily, falls back to Playwright if needed
+- Uses HTTP GET to data.aspx for full text
 - Caches results for 30 days
 
 ```python
@@ -255,9 +252,6 @@ Any MCP client that follows the [Model Context Protocol specification](https://m
 **`ModuleNotFoundError: No module named 'mcp_server'`**
 → You did not run `pip install -e .` inside the venv. Go back to Quick Start step 2.
 
-**`playwright._impl._errors.Error: Executable doesn't exist`**
-→ You skipped Quick Start step 3. Run `.venv/bin/playwright install chromium`. Only `search_judgments` with `keyword` (full-text) needs this; case-number lookups use pure HTTP and work without Playwright.
-
 **`FileNotFoundError: data/pcode_all.json`**
 → The bundled `mcp_server/data/pcode_all.json` is missing or got deleted. Restore from `git checkout mcp_server/data/pcode_all.json`, or trigger a refresh:
 ```bash
@@ -266,9 +260,6 @@ Any MCP client that follows the [Model Context Protocol specification](https://m
 
 **MCP client reports "server failed to start"**
 → Run the verify command from Quick Start step 4 directly. If it fails, the import chain is broken — read the traceback. If it passes, the issue is in the MCP client's launch configuration (wrong path, wrong cwd).
-
-**Slow first query**
-→ On startup the server lazy-starts Playwright in the background (~12s). First `search_judgments` keyword call may block briefly if warmup hasn't finished. Subsequent calls are fast.
 
 ---
 
