@@ -90,7 +90,7 @@ async def test_search_httpx_exception_gives_friendly_message(client, monkeypatch
 
 @pytest.mark.asyncio
 async def test_search_timeout_exception_gives_friendly_message(client, monkeypatch):
-    """asyncio.TimeoutError → 逾時訊息分流"""
+    """asyncio.TimeoutError → 逾時訊息分流（涵蓋 waf_bypass 收斂的 Playwright 逾時）"""
     async def boom(self, params, max_results):
         raise asyncio.TimeoutError()
     monkeypatch.setattr(JudicialSearchClient, "_keyword_search_http", boom)
@@ -99,6 +99,20 @@ async def test_search_timeout_exception_gives_friendly_message(client, monkeypat
     result = await client.search(keyword="契約")
     assert result["success"] is False
     assert "逾時" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_search_httpx_timeout_routes_to_timeout_arm(client, monkeypatch):
+    """httpx.TimeoutException 是 HTTPError 子類，必須先被 timeout arm 捕捉"""
+    async def boom(self, params, max_results):
+        raise httpx.ReadTimeout("timed out")
+    monkeypatch.setattr(JudicialSearchClient, "_keyword_search_http", boom)
+    monkeypatch.setattr(JudicialSearchClient, "_rate_limit", _no_rate_limit)
+
+    result = await client.search(keyword="契約")
+    assert result["success"] is False
+    assert "逾時" in result["error"]
+    assert "連線" not in result["error"]
 
 
 @pytest.mark.asyncio

@@ -85,7 +85,10 @@ class JudicialWAFBypass:
 
     async def _run_warmup(self) -> None:
         try:
-            from playwright.async_api import async_playwright
+            from playwright.async_api import (
+                TimeoutError as PlaywrightTimeoutError,
+                async_playwright,
+            )
         except ImportError:
             raise RuntimeError(
                 "Playwright 為繞過司法院 F5 WAF 所必需。"
@@ -94,41 +97,46 @@ class JudicialWAFBypass:
 
         logger.info("WAF bypass: running Playwright warmup...")
         t0 = time.time()
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
-            )
-            try:
-                ctx = await browser.new_context(
-                    locale="zh-TW",
-                    timezone_id="Asia/Taipei",
-                    user_agent=(
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/120.0.0.0 Safari/537.36"
-                    ),
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
                 )
-                page = await ctx.new_page()
-                await page.goto(
-                    _WARMUP_URL, wait_until="domcontentloaded", timeout=60000
-                )
-                # 等真表單出現（代表 F5 挑戰已過）
                 try:
-                    await page.wait_for_selector("#btnQry", state="visible", timeout=15000)
-                except Exception:
-                    logger.warning("WAF bypass: #btnQry 未顯示，cookies 可能仍無效")
-                cookies = await ctx.cookies()
-                self._cookies = {c["name"]: c["value"] for c in cookies}
-                self._last_warmup_at = time.time()
-                self._save_to_disk()
-                elapsed = time.time() - t0
-                logger.info(
-                    "WAF bypass: warmup OK in %.1fs, got %d cookies",
-                    elapsed, len(self._cookies),
-                )
-            finally:
-                await browser.close()
+                    ctx = await browser.new_context(
+                        locale="zh-TW",
+                        timezone_id="Asia/Taipei",
+                        user_agent=(
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/120.0.0.0 Safari/537.36"
+                        ),
+                    )
+                    page = await ctx.new_page()
+                    await page.goto(
+                        _WARMUP_URL, wait_until="domcontentloaded", timeout=60000
+                    )
+                    # 等真表單出現（代表 F5 挑戰已過）
+                    try:
+                        await page.wait_for_selector("#btnQry", state="visible", timeout=15000)
+                    except Exception:
+                        logger.warning("WAF bypass: #btnQry 未顯示，cookies 可能仍無效")
+                    cookies = await ctx.cookies()
+                    self._cookies = {c["name"]: c["value"] for c in cookies}
+                    self._last_warmup_at = time.time()
+                    self._save_to_disk()
+                    elapsed = time.time() - t0
+                    logger.info(
+                        "WAF bypass: warmup OK in %.1fs, got %d cookies",
+                        elapsed, len(self._cookies),
+                    )
+                finally:
+                    await browser.close()
+        except PlaywrightTimeoutError as e:
+            # 將 Playwright 專屬例外收斂成 stdlib asyncio.TimeoutError，
+            # 讓上游 search handler 不必依賴 Playwright 型別。
+            raise asyncio.TimeoutError("WAF warmup 逾時") from e
 
     @staticmethod
     def is_blocked(response_text: str) -> bool:

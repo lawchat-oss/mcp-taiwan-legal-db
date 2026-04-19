@@ -22,6 +22,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from zoneinfo import ZoneInfo
 
+from mcp_server.ssl_setup import inject_os_trust_store
+
+inject_os_trust_store()
+
 import httpx
 
 logger = logging.getLogger(__name__)

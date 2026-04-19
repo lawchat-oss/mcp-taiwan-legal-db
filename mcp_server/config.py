@@ -19,8 +19,8 @@
 # This preserves *full* SSL verification (verify=True) on macOS + Windows
 # and the majority of Linux installations. No `verify=False` is needed
 # anywhere in the codebase.
-import truststore
-truststore.inject_into_ssl()
+from mcp_server.ssl_setup import inject_os_trust_store
+inject_os_trust_store()
 
 from pathlib import Path
 
