@@ -196,7 +196,13 @@ CASE_TYPE_CODE_TO_NAME = {v: k for k, v in CASE_TYPE_CODES.items()}
 
 
 def validate_url_domain(url: str) -> bool:
-    """驗證 URL 是否在允許的域名清單中"""
+    """驗證 URL 是否在允許的域名清單中。
+
+    同時檢查 scheme：只接受 http/https，拒絕 file / ftp / gopher 等會
+    誤導驗證結果的協定（例：ftp://judgment.judicial.gov.tw/ 原本會過）。
+    """
     from urllib.parse import urlparse
     parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False
     return parsed.hostname in ALLOWED_DOMAINS

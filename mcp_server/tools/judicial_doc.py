@@ -115,11 +115,13 @@ class JudgmentDocClient:
 
     async def _fetch_via_http(self, jid: str) -> dict | None:
         """透過 HTTP GET data.aspx 取得裁判書（遇 WAF 自動刷 cookie 重試）"""
-        url = f"{JUDICIAL_DATA_URL}?ty=JD&id={jid}"
+        # 用 httpx params 參數化：防 jid="x&ty=evil" 等注入綁 query string。
+        params = {"ty": "JD", "id": jid}
+        url = JUDICIAL_DATA_URL
 
         try:
             start = time.monotonic()
-            resp = await get_with_waf_retry(self.http, url, self.waf)
+            resp = await get_with_waf_retry(self.http, url, self.waf, params=params)
             elapsed = time.monotonic() - start
             logger.info("HTTP data.aspx 回應: status=%d, elapsed=%.2fs, jid=%s",
                         resp.status_code, elapsed, jid)
@@ -147,7 +149,7 @@ class JudgmentDocClient:
 
             data = {
                 "source": "http_data_aspx",
-                "source_url": url,
+                "source_url": str(resp.url),
                 "timestamp": datetime.now().isoformat(),
                 **parsed,
             }

@@ -58,6 +58,10 @@ class TestUrlWhitelist:
         "https://judgment.judicial.gov.tw.evil.com/",
         "file:///etc/passwd",
         "https://judicial.gov.tw/",  # 缺 judgment/data prefix
+        # 非 http(s) scheme 即便打到白名單 host 也必須拒絕：
+        "ftp://judgment.judicial.gov.tw/FJUD/data.aspx",
+        "gopher://judgment.judicial.gov.tw/1",
+        "javascript:alert(1)",
     ])
     def test_blocked(self, url):
         assert validate_url_domain(url) is False

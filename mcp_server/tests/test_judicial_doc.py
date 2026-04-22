@@ -1,5 +1,6 @@
 """JudgmentDocClient 集成測試：白名單、快取、URL 驗證"""
 
+import httpx
 import pytest
 
 from mcp_server.cache.db import CacheDB
@@ -51,6 +52,34 @@ async def test_get_by_jid_uses_cache(client, cache):
     assert result["success"] is True
     assert result["cached"] is True
     assert result["court"] == "最高法院"
+
+
+@pytest.mark.asyncio
+async def test_fetch_via_http_passes_jid_as_params_not_raw_query(client, monkeypatch):
+    """jid='x&ty=evil' 等惡意輸入必須走 httpx params，不可被串接進 URL。
+
+    httpx 的 params= 會對 value 做 URL-encode，所以 '&' 會變 '%26'，
+    不會被 server 解析成另一個 query 參數。
+    """
+    captured: dict = {}
+
+    async def fake_get(url, **kwargs):
+        captured["url"] = url
+        captured["params"] = kwargs.get("params")
+        # 回一個非 block 的 200 response，避開 get_with_waf_retry 的 retry 路徑。
+        return httpx.Response(
+            200,
+            text="<html><body>no #jud</body></html>",
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(client.http, "get", fake_get)
+
+    malicious = "x&ty=evil&id=other"
+    await client._fetch_via_http(malicious)
+
+    assert captured["params"] == {"ty": "JD", "id": malicious}
+    assert "&" not in captured["url"], "URL 主體不該含手工串接的 query 分隔"
 
 
 @pytest.mark.asyncio
