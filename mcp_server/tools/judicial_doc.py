@@ -13,7 +13,11 @@ from mcp_server.config import (
 )
 from mcp_server.cache.db import CacheDB
 from mcp_server.parsers.judicial_parser import parse_judgment_page
-from mcp_server.tools.waf_bypass import JudicialWAFBypass, get_with_waf_retry
+from mcp_server.tools.waf_bypass import (
+    JudicialWAFBypass,
+    WAFPermanentBlockError,
+    get_with_waf_retry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +54,16 @@ class JudgmentDocClient:
             return {"success": True, "cached": True, **cached}
 
         # HTTP GET data.aspx
-        result = await self._fetch_via_http(jid)
+        try:
+            result = await self._fetch_via_http(jid)
+        except WAFPermanentBlockError:
+            logger.warning("取裁判書遭司法院 WAF 硬擋 (JID: %s)", jid)
+            return {
+                "success": False,
+                "error": "司法院網站暫時無法通過 WAF 防護，請稍後重試",
+                "jid": jid,
+                "timestamp": datetime.now().isoformat(),
+            }
         if result and result.get("success"):
             return result
 
@@ -97,6 +110,13 @@ class JudgmentDocClient:
                 }
                 await self.cache.set_judgment(cache_key, data, source="http")
                 return {"success": True, "cached": False, **data}
+        except WAFPermanentBlockError:
+            logger.warning("取裁判書遭司法院 WAF 硬擋 (URL: %s)", url)
+            return {
+                "success": False,
+                "error": "司法院網站暫時無法通過 WAF 防護，請稍後重試",
+                "timestamp": datetime.now().isoformat(),
+            }
         except httpx.HTTPError as e:
             logger.warning("HTTP 取得裁判書失敗: %s", e)
 

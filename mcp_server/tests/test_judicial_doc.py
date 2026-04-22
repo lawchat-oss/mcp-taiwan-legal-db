@@ -4,7 +4,7 @@ import pytest
 
 from mcp_server.cache.db import CacheDB
 from mcp_server.tools.judicial_doc import JudgmentDocClient
-from mcp_server.tools.waf_bypass import JudicialWAFBypass
+from mcp_server.tools.waf_bypass import JudicialWAFBypass, WAFPermanentBlockError
 
 
 @pytest.fixture
@@ -51,3 +51,16 @@ async def test_get_by_jid_uses_cache(client, cache):
     assert result["success"] is True
     assert result["cached"] is True
     assert result["court"] == "最高法院"
+
+
+@pytest.mark.asyncio
+async def test_get_by_jid_waf_permanent_block_gives_dedicated_message(client, monkeypatch):
+    """WAFPermanentBlockError 要轉成結構化錯誤，不可往上冒泡到 MCP 框架。"""
+    async def boom(self, jid):
+        raise WAFPermanentBlockError("blocked twice")
+    monkeypatch.setattr(JudgmentDocClient, "_fetch_via_http", boom)
+
+    result = await client.get_by_jid("TPSV,104,台上,472,20150326,1")
+    assert result["success"] is False
+    assert "WAF" in result["error"]
+    assert result["jid"] == "TPSV,104,台上,472,20150326,1"

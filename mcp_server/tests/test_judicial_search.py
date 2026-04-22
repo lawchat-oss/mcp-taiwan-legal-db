@@ -11,7 +11,7 @@ import pytest
 
 from mcp_server.cache.db import CacheDB
 from mcp_server.tools.judicial_search import JudicialSearchClient
-from mcp_server.tools.waf_bypass import JudicialWAFBypass
+from mcp_server.tools.waf_bypass import JudicialWAFBypass, WAFPermanentBlockError
 
 
 @pytest.fixture
@@ -113,6 +113,33 @@ async def test_search_httpx_timeout_routes_to_timeout_arm(client, monkeypatch):
     assert result["success"] is False
     assert "逾時" in result["error"]
     assert "連線" not in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_search_waf_permanent_block_gives_dedicated_message(client, monkeypatch):
+    """WAFPermanentBlockError 要分流到 WAF 訊息，不是通用 / HTTPError。"""
+    async def boom(self, params, max_results):
+        raise WAFPermanentBlockError("blocked twice")
+    monkeypatch.setattr(JudicialSearchClient, "_keyword_search_http", boom)
+    monkeypatch.setattr(JudicialSearchClient, "_rate_limit", _no_rate_limit)
+
+    result = await client.search(keyword="契約")
+    assert result["success"] is False
+    assert "WAF" in result["error"]
+    assert "逾時" not in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_precise_fast_path_propagates_waf_permanent_block(client, monkeypatch):
+    """精確案號路徑的 WAFPermanentBlockError 不可被 precise 內部 Exception 吃掉。"""
+    async def boom(self, params, max_results):
+        raise WAFPermanentBlockError("blocked twice")
+    monkeypatch.setattr(JudicialSearchClient, "_precise_search_http", boom)
+    monkeypatch.setattr(JudicialSearchClient, "_rate_limit", _no_rate_limit)
+
+    result = await client.search(case_word="台上", case_number="123")
+    assert result["success"] is False
+    assert "WAF" in result["error"]
 
 
 @pytest.mark.asyncio

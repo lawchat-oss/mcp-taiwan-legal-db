@@ -18,7 +18,11 @@ from mcp_server.config import (
 )
 from mcp_server.cache.db import CacheDB
 from mcp_server.parsers.judicial_parser import parse_search_results
-from mcp_server.tools.waf_bypass import JudicialWAFBypass, get_with_waf_retry
+from mcp_server.tools.waf_bypass import (
+    JudicialWAFBypass,
+    WAFPermanentBlockError,
+    get_with_waf_retry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -99,33 +103,33 @@ class JudicialSearchClient:
                 "query": params,
             }
 
-        # ── 精確案號搜尋：case_word + case_number → HTTP GET（快、準） ──
-        # 只有在沒有全文/主文過濾條件時才可安全走 fast path；
-        # 否則會忽略 keyword / main_text 並把錯結果寫進快取。
-        if (
-            params.get("case_word")
-            and params.get("case_number")
-            and not params.get("keyword")
-            and not params.get("main_text")
-        ):
-            http_results = await self._precise_search_http(params, max_results)
-            if http_results is not None:
-                data = {
-                    "success": True,
-                    "query": params,
-                    "total_count": len(http_results),
-                    "results": http_results,
-                    "cached": False,
-                    "timestamp": datetime.now().isoformat(),
-                }
-                if http_results:
-                    await self.cache.set_search(params, data)
-                return data
-
-        # ── 關鍵字搜尋 → HTTP POST（ASP.NET 表單） ──
-        await self._rate_limit()
-
         try:
+            # ── 精確案號搜尋：case_word + case_number → HTTP GET（快、準） ──
+            # 只有在沒有全文/主文過濾條件時才可安全走 fast path；
+            # 否則會忽略 keyword / main_text 並把錯結果寫進快取。
+            if (
+                params.get("case_word")
+                and params.get("case_number")
+                and not params.get("keyword")
+                and not params.get("main_text")
+            ):
+                http_results = await self._precise_search_http(params, max_results)
+                if http_results is not None:
+                    data = {
+                        "success": True,
+                        "query": params,
+                        "total_count": len(http_results),
+                        "results": http_results,
+                        "cached": False,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                    if http_results:
+                        await self.cache.set_search(params, data)
+                    return data
+
+            # ── 關鍵字搜尋 → HTTP POST（ASP.NET 表單） ──
+            await self._rate_limit()
+
             results = await self._keyword_search_http(params, max_results)
             data = {
                 "success": True,
@@ -149,6 +153,14 @@ class JudicialSearchClient:
             return {
                 "success": False,
                 "error": "搜尋逾時，請稍後重試或縮小查詢範圍",
+                "query": params,
+                "timestamp": datetime.now().isoformat(),
+            }
+        except WAFPermanentBlockError:
+            logger.warning("搜尋遭司法院 WAF 硬擋")
+            return {
+                "success": False,
+                "error": "司法院網站暫時無法通過 WAF 防護，請稍後重試",
                 "query": params,
                 "timestamp": datetime.now().isoformat(),
             }
@@ -265,6 +277,10 @@ class JudicialSearchClient:
                 )
                 return all_results[:max_results]
 
+        except WAFPermanentBlockError:
+            # WAF 硬擋不是「此路徑壞了改走 keyword」，而是整組請求都會擋。
+            # 放行給上層 search() 統一分流。
+            raise
         except Exception as e:
             logger.warning("精確搜尋 HTTP GET 失敗: %s", e)
             return None

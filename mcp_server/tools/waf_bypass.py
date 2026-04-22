@@ -18,6 +18,14 @@ _COOKIE_FILE = Path(__file__).parent.parent / "data" / ".judicial_cookies.json"
 _WARMUP_URL = "https://judgment.judicial.gov.tw/FJUD/Default_AD.aspx"
 
 
+class WAFPermanentBlockError(RuntimeError):
+    """WAF 在刷新 cookies 後仍持續擋請求，屬於無法自動復原的硬擋。
+
+    上游 search / doc handler 需要攔這個並回傳明確訊息，否則解析 block 頁
+    會產生空結果或垃圾資料，讓使用者誤以為「沒結果」。
+    """
+
+
 class JudicialWAFBypass:
     """管理 judgment.judicial.gov.tw 的 F5 WAF cookies。
 
@@ -76,9 +84,10 @@ class JudicialWAFBypass:
     async def refresh(self) -> None:
         """執行 Playwright warmup，重取 TSPD cookies。"""
         async with self._lock:
-            # 若另一個 task 剛剛做完，避免重複 warmup
+            # 若另一個 task 剛剛做完（不論成功或 cookies 空），都先讓它沈澱 5 秒；
+            # 不檢查 self._cookies，否則 warmup 回空時 N 個並發會各拉一次 Chromium。
             now = time.time()
-            if now - self._last_warmup_at < 5.0 and self._cookies:
+            if now - self._last_warmup_at < 5.0:
                 logger.debug("WAF bypass: skipping duplicate warmup (fresh < 5s)")
                 return
             await self._run_warmup()
@@ -172,4 +181,10 @@ async def get_with_waf_retry(
         await waf.refresh()
         client.cookies.update(waf.get_cookies())
         r = await func(url, **kwargs)
+        if waf.is_blocked(r.text):
+            # 刷新後仍被擋：若不 raise，上游 parser 會吃到 block HTML
+            # 然後輸出空結果 / 垃圾資料，使用者看到的是「查無結果」。
+            raise WAFPermanentBlockError(
+                "司法院 WAF 在重新整理 cookies 後仍持續擋請求"
+            )
     return r

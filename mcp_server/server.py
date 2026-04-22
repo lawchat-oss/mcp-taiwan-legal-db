@@ -53,6 +53,17 @@ async def _maybe_update_pcode_all():
         logger.warning("pcode_all.json 更新失敗: %s", e)
 
 
+def _log_background_task_exception(task: asyncio.Task) -> None:
+    """background task 的 done callback：cancelled 無聲，例外必留 traceback。"""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error(
+            "Background task %r failed", task.get_name(), exc_info=exc
+        )
+
+
 @asynccontextmanager
 async def lifespan(server: FastMCP):
     """伺服器生命週期：啟動時初始化，關閉時清理"""
@@ -71,8 +82,16 @@ async def lifespan(server: FastMCP):
 
     logger.info("台灣法律資料庫 MCP Server 已啟動")
 
-    _pcode_task = asyncio.create_task(_maybe_update_pcode_all())
-    _pcode_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+    _pcode_task = asyncio.create_task(
+        _maybe_update_pcode_all(), name="pcode_all_update"
+    )
+    _pcode_task.add_done_callback(_log_background_task_exception)
+
+    # WAF cookies 預熱：沒預熱的話，第一個請求會在 search handler 內同步等
+    # Playwright warmup，使用者看到的只會是籠統的「搜尋逾時」。
+    _waf_task = asyncio.create_task(waf.ensure_ready(), name="waf_warmup")
+    _waf_task.add_done_callback(_log_background_task_exception)
+
     yield
 
     # 關閉
