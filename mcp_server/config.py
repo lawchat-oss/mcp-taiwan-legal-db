@@ -39,12 +39,10 @@ CACHE_DB_PATH = PROJECT_ROOT / "data" / "cache" / "legal_mcp.db"
 CACHE_JUDGMENT_TTL = 2592000   # 30 天（判決書少有變動，但 parser 更新後需要刷新快取）
 CACHE_SEARCH_TTL = 86400       # 24 小時
 CACHE_REGULATION_TTL = 604800  # 7 天
-CACHE_PCODE_TTL = 2592000      # 30 天
 
-# 搜尋限速
-SEARCH_RATE_LIMIT = 5          # 每分鐘最多 5 次
-SEARCH_DELAY_MIN = 1.0         # 秒
-SEARCH_DELAY_MAX = 3.0         # 秒
+# 搜尋限速（每次搜尋間隔隨機取 MIN ~ MAX 秒）
+SEARCH_DELAY_MIN = 1.0
+SEARCH_DELAY_MAX = 3.0
 
 # 法規 API
 REGULATION_API_BASE = "https://law.moj.gov.tw"
@@ -54,10 +52,7 @@ REGULATION_HISTORY_URL = REGULATION_API_BASE + "/LawClass/LawHistory.aspx"
 
 # 司法院
 JUDICIAL_SEARCH_URL = "https://judgment.judicial.gov.tw/FJUD/Default_AD.aspx"
-JUDICIAL_PRINT_URL = "https://judgment.judicial.gov.tw/FJUD/printData.aspx"
 JUDICIAL_DATA_URL = "https://judgment.judicial.gov.tw/FJUD/data.aspx"
-# 已廢棄：JDoc API 完全回傳 405，改用 JUDICIAL_DATA_URL (data.aspx)
-JDOC_API_BASE = "http://data.judicial.gov.tw/jdg/api"
 
 # 常用法規 pcode 對照表
 PCODE_MAP = {

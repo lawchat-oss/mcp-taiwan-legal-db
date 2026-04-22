@@ -13,6 +13,7 @@ from mcp_server.config import (
 )
 from mcp_server.cache.db import CacheDB
 from mcp_server.parsers.judicial_parser import parse_judgment_page
+from mcp_server.tools._errors import error_response
 from mcp_server.tools.waf_bypass import (
     JudicialWAFBypass,
     WAFPermanentBlockError,
@@ -58,27 +59,19 @@ class JudgmentDocClient:
             result = await self._fetch_via_http(jid)
         except WAFPermanentBlockError:
             logger.warning("取裁判書遭司法院 WAF 硬擋 (JID: %s)", jid)
-            return {
-                "success": False,
-                "error": "司法院網站暫時無法通過 WAF 防護，請稍後重試",
-                "jid": jid,
-                "timestamp": datetime.now().isoformat(),
-            }
+            return error_response(
+                "司法院網站暫時無法通過 WAF 防護，請稍後重試", jid=jid,
+            )
         if result and result.get("success"):
             return result
 
-        return {
-            "success": False,
-            "error": f"無法取得裁判書全文（JID: {jid}）",
-            "jid": jid,
-            "timestamp": datetime.now().isoformat(),
-        }
+        return error_response(f"無法取得裁判書全文（JID: {jid}）", jid=jid)
 
     async def get_by_url(self, url: str) -> dict:
         """以 URL 取得裁判書全文"""
         from mcp_server.config import validate_url_domain
         if not validate_url_domain(url):
-            return {"success": False, "error": "URL 域名不在白名單中"}
+            return error_response("URL 域名不在白名單中", url=url)
 
         # 嘗試從 URL 擷取 JID 作為快取 key
         import re
@@ -112,19 +105,13 @@ class JudgmentDocClient:
                 return {"success": True, "cached": False, **data}
         except WAFPermanentBlockError:
             logger.warning("取裁判書遭司法院 WAF 硬擋 (URL: %s)", url)
-            return {
-                "success": False,
-                "error": "司法院網站暫時無法通過 WAF 防護，請稍後重試",
-                "timestamp": datetime.now().isoformat(),
-            }
+            return error_response(
+                "司法院網站暫時無法通過 WAF 防護，請稍後重試", url=url,
+            )
         except httpx.HTTPError as e:
             logger.warning("HTTP 取得裁判書失敗: %s", e)
 
-        return {
-            "success": False,
-            "error": f"無法取得裁判書全文（URL: {url}）",
-            "timestamp": datetime.now().isoformat(),
-        }
+        return error_response(f"無法取得裁判書全文（URL: {url}）", url=url)
 
     async def _fetch_via_http(self, jid: str) -> dict | None:
         """透過 HTTP GET data.aspx 取得裁判書（遇 WAF 自動刷 cookie 重試）"""

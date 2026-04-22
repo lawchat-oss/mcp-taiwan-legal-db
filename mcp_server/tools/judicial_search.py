@@ -18,11 +18,28 @@ from mcp_server.config import (
 )
 from mcp_server.cache.db import CacheDB
 from mcp_server.parsers.judicial_parser import parse_search_results
+from mcp_server.tools._errors import error_response
 from mcp_server.tools.waf_bypass import (
     JudicialWAFBypass,
     WAFPermanentBlockError,
     get_with_waf_retry,
 )
+
+# JID 預期格式：court_code,year,case_word,case_number,date,serial
+# 例：TPSV,104,台上,472,20150326,1
+# 每個欄位用 [^,]+ 而非 .+，避免貪婪匹配跨欄位邊界。
+_JID_RE = re.compile(r"^[A-Z]{2,6},\d+,[^,]+,[0-9A-Za-z\-]+,\d{8},\d+$")
+
+
+def _valid_search_results(results: list[dict]) -> bool:
+    """回傳 True 表示 results 每筆都有合法 jid，可以寫入 24h 快取。
+
+    搜尋 parser 曾因司法院改版把 iframe chrome 誤 match 成 row（audit item #4）；
+    在寫入前 gate 住，避免垃圾污染 24h 快取。
+    """
+    if not results:
+        return False
+    return all(bool(_JID_RE.match(r.get("jid", ""))) for r in results)
 
 logger = logging.getLogger(__name__)
 
@@ -97,11 +114,10 @@ class JudicialSearchClient:
             return cached
 
         if not keyword and not case_number and not main_text:
-            return {
-                "success": False,
-                "error": "至少需要提供 keyword / case_number / main_text 其一",
-                "query": params,
-            }
+            return error_response(
+                "至少需要提供 keyword / case_number / main_text 其一",
+                query=params,
+            )
 
         try:
             # ── 精確案號搜尋：case_word + case_number → HTTP GET（快、準） ──
@@ -123,7 +139,7 @@ class JudicialSearchClient:
                         "cached": False,
                         "timestamp": datetime.now().isoformat(),
                     }
-                    if http_results:
+                    if _valid_search_results(http_results):
                         await self.cache.set_search(params, data)
                     return data
 
@@ -140,7 +156,7 @@ class JudicialSearchClient:
                 "timestamp": datetime.now().isoformat(),
             }
 
-            if results:
+            if _valid_search_results(results):
                 await self.cache.set_search(params, data)
 
             return data
@@ -150,36 +166,25 @@ class JudicialSearchClient:
             # 必須在 httpx.HTTPError arm 之前攔截。asyncio.TimeoutError 涵蓋
             # waf_bypass 收斂上來的 Playwright warmup 逾時。
             logger.exception("搜尋逾時")
-            return {
-                "success": False,
-                "error": "搜尋逾時，請稍後重試或縮小查詢範圍",
-                "query": params,
-                "timestamp": datetime.now().isoformat(),
-            }
+            return error_response(
+                "搜尋逾時，請稍後重試或縮小查詢範圍", query=params
+            )
         except WAFPermanentBlockError:
             logger.warning("搜尋遭司法院 WAF 硬擋")
-            return {
-                "success": False,
-                "error": "司法院網站暫時無法通過 WAF 防護，請稍後重試",
-                "query": params,
-                "timestamp": datetime.now().isoformat(),
-            }
+            return error_response(
+                "司法院網站暫時無法通過 WAF 防護，請稍後重試", query=params
+            )
         except httpx.HTTPError:
             logger.exception("搜尋連線失敗")
-            return {
-                "success": False,
-                "error": "連線司法院網站失敗，請稍後重試",
-                "query": params,
-                "timestamp": datetime.now().isoformat(),
-            }
+            return error_response(
+                "連線司法院網站失敗，請稍後重試", query=params
+            )
         except Exception:
             logger.exception("搜尋發生未預期錯誤")
-            return {
-                "success": False,
-                "error": "搜尋發生未預期錯誤，請查看 server log 取得詳細資訊",
-                "query": params,
-                "timestamp": datetime.now().isoformat(),
-            }
+            return error_response(
+                "搜尋發生未預期錯誤，請查看 server log 取得詳細資訊",
+                query=params,
+            )
 
     async def _precise_search_http(
         self, params: dict, max_results: int,
@@ -311,7 +316,8 @@ class JudicialSearchClient:
             if not viewstate or not event_val:
                 raise RuntimeError(
                     "無法取得 ASP.NET 表單 token（__VIEWSTATE / __EVENTVALIDATION）。"
-                    "可能 F5 WAF cookie warmup 失敗，請檢查 Playwright 是否已安裝。"
+                    "可能原因：F5 WAF cookies 失效（檢查 .judicial_cookies.json + Playwright 安裝）"
+                    "或司法院頁面結構改版。"
                 )
 
             # Step 2: 建構 POST 表單資料

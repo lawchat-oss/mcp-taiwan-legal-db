@@ -12,7 +12,6 @@ from mcp_server.config import (
     CACHE_JUDGMENT_TTL,
     CACHE_SEARCH_TTL,
     CACHE_REGULATION_TTL,
-    CACHE_PCODE_TTL,
 )
 
 logger = logging.getLogger(__name__)
@@ -197,19 +196,6 @@ class CacheDB:
             (pcode, article_no, json.dumps(data, ensure_ascii=False), exp),
         )
         await self.db.commit()
-
-    async def invalidate_all_regulations(self) -> int:
-        """清除所有 regulation_cache（pcode_all 週六更新後使用）。
-
-        法規修法時 pcode_all.json 無法偵測（只有名稱+廢止），
-        一週一次全清確保 100% 一致性，代價很小（通常幾百筆快取）。
-        """
-        cursor = await self.db.execute("DELETE FROM regulation_cache")
-        await self.db.commit()
-        count = cursor.rowcount
-        if count:
-            logger.info("已清除 %d 筆法規快取", count)
-        return count
 
     async def cleanup_invalid_regulation_names(self):
         """清理法規名稱為『條文內容』等無效值的快取條目"""

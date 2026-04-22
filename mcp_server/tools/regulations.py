@@ -14,6 +14,7 @@ from mcp_server.config import (
 )
 from mcp_server.cache.db import CacheDB
 from mcp_server.parsers.regulation_parser import parse_single_article, parse_law_all, _looks_like_article, INVALID_LAW_NAMES
+from mcp_server.tools._errors import error_response
 
 logger = logging.getLogger(__name__)
 
@@ -218,17 +219,16 @@ class RegulationClient:
                 if not _looks_like_article(art.get("content", "")):
                     # 快取含垃圾內容 → 視為條號不存在
                     law_name = cached.get("law", {}).get("name", pcode)
-                    return {
-                        "success": False,
-                        "error": f"查無此條號：{law_name} 第 {article_no} 條不存在或已刪除",
-                        "law": cached.get("law", {"pcode": pcode, "status": _get_law_status(pcode)}),
-                    }
+                    return error_response(
+                        f"查無此條號：{law_name} 第 {article_no} 條不存在或已刪除",
+                        law=cached.get("law", {"pcode": pcode, "status": _get_law_status(pcode)}),
+                    )
             return {"success": True, "cached": True, **cached}
 
         # HTTP 查詢
         url = f"{REGULATION_SINGLE_URL}?pcode={pcode}&flno={article_no}"
         if not validate_url_domain(url):
-            return {"success": False, "error": "域名不在白名單中"}
+            return error_response("域名不在白名單中", url=url)
 
         try:
             resp = await self.client.get(url)
@@ -243,11 +243,10 @@ class RegulationClient:
 
             # 條文內容為空 → 該條號不存在
             if not article_content:
-                return {
-                    "success": False,
-                    "error": f"查無此條號：{law_name or pcode} 第 {article_no} 條不存在或已刪除",
-                    "law": {"pcode": pcode, "name": law_name, "status": status},
-                }
+                return error_response(
+                    f"查無此條號：{law_name or pcode} 第 {article_no} 條不存在或已刪除",
+                    law={"pcode": pcode, "name": law_name, "status": status},
+                )
 
             data = {
                 "law": {
@@ -267,7 +266,12 @@ class RegulationClient:
             return {"success": True, "cached": False, **data}
 
         except httpx.HTTPError as e:
-            return {"success": False, "error": f"HTTP 錯誤: {e}"}
+            logger.warning("查詢條文 HTTP 失敗 (pcode=%s, flno=%s): %s",
+                           pcode, article_no, e)
+            return error_response(
+                "連線全國法規資料庫失敗，請稍後重試",
+                law={"pcode": pcode},
+            )
 
     async def get_all_articles(self, pcode: str) -> dict:
         """查詢法規全文（所有條文）"""
@@ -285,7 +289,7 @@ class RegulationClient:
 
         url = f"{REGULATION_ALL_URL}?pcode={pcode}"
         if not validate_url_domain(url):
-            return {"success": False, "error": "域名不在白名單中"}
+            return error_response("域名不在白名單中", url=url)
 
         try:
             resp = await self.client.get(url)
@@ -324,7 +328,11 @@ class RegulationClient:
             return {"success": True, "cached": False, **data}
 
         except httpx.HTTPError as e:
-            return {"success": False, "error": f"HTTP 錯誤: {e}"}
+            logger.warning("查詢法規全文 HTTP 失敗 (pcode=%s): %s", pcode, e)
+            return error_response(
+                "連線全國法規資料庫失敗，請稍後重試",
+                law={"pcode": pcode},
+            )
 
     async def get_article_range(self, pcode: str, from_no: str, to_no: str) -> dict:
         """查詢條號範圍"""

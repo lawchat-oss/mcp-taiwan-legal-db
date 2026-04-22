@@ -269,7 +269,7 @@ def _strip_inline_tags(html: str) -> str:
 
 
 def parse_judgment_page(html: str) -> dict:
-    """解析裁判書全文頁面（printData.aspx）"""
+    """解析裁判書全文頁面（data.aspx）"""
     soup = BeautifulSoup(html, "lxml")
 
     result = {

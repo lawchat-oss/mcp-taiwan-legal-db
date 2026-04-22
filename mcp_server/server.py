@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from mcp.server.fastmcp import FastMCP
 
 from mcp_server.cache.db import CacheDB
+from mcp_server.tools._errors import error_response
 from mcp_server.tools.regulations import RegulationClient
 from mcp_server.tools.judicial_search import JudicialSearchClient
 from mcp_server.tools.judicial_doc import JudgmentDocClient
@@ -165,7 +166,7 @@ async def search_judgments(
         包含搜尋結果的字典：success, query, total_count, results, cached, timestamp
     """
     if max_results <= 0:
-        return {"success": False, "error": "max_results 必須大於 0"}
+        return error_response("max_results 必須大於 0")
 
     # 硬上限防止 OOM（100 頁 × 20 筆 = 2000 筆，但實務上 200 已足夠）
     max_results = min(max_results, 200)
@@ -213,7 +214,7 @@ async def get_judgment(
         cited_statutes, cited_cases, full_text, source_url
     """
     if not jid and not url:
-        return {"success": False, "error": "至少需要提供 jid 或 url"}
+        return error_response("至少需要提供 jid 或 url")
 
     logger.info("get_judgment: jid=%r, url=%r", jid, url[:80] if url else "")
     if jid:
@@ -260,14 +261,14 @@ async def query_regulation(
     if not pcode and law_name:
         pcode = reg_client.resolve_pcode(law_name)
         if not pcode:
-            return {
-                "success": False,
-                "error": f"找不到法規「{law_name}」的代碼（pcode）。"
-                         f"請使用 get_pcode 工具查詢，或直接提供 pcode。",
-            }
+            return error_response(
+                f"找不到法規「{law_name}」的代碼（pcode）。"
+                f"請使用 get_pcode 工具查詢，或直接提供 pcode。",
+                law_name=law_name,
+            )
 
     if not pcode:
-        return {"success": False, "error": "須提供 law_name 或 pcode"}
+        return error_response("須提供 law_name 或 pcode")
 
     logger.info("query_regulation: law_name=%r, pcode=%r, article_no=%r, range=%s~%s, history=%s",
                 law_name, pcode, article_no, from_no, to_no, include_history)
@@ -334,12 +335,11 @@ async def get_pcode(law_name: str) -> dict:
         if law_name in name or name in law_name
     ]
 
-    return {
-        "success": False,
-        "error": f"找不到「{law_name}」對應的 pcode",
-        "suggestions": suggestions[:10],
-        "available_count": len(_PCODE_ALL),
-    }
+    return error_response(
+        f"找不到「{law_name}」對應的 pcode",
+        suggestions=suggestions[:10],
+        available_count=len(_PCODE_ALL),
+    )
 
 
 # ============================================================
@@ -362,9 +362,9 @@ async def search_regulations(keyword: str, offset: int = 0, exclude_abolished: b
         符合關鍵字的法規列表
     """
     if not keyword:
-        return {"success": False, "error": "請提供搜尋關鍵字"}
+        return error_response("請提供搜尋關鍵字")
     if offset < 0:
-        return {"success": False, "error": "offset 不可為負數"}
+        return error_response("offset 不可為負數")
 
     logger.info("search_regulations: keyword=%r, offset=%d, exclude_abolished=%s",
                 keyword, offset, exclude_abolished)

@@ -116,6 +116,64 @@ async def test_search_httpx_timeout_routes_to_timeout_arm(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_search_skips_cache_when_results_have_no_jid(client, cache, monkeypatch):
+    """parser 誤 match 產生沒 jid 的垃圾 row 時，不可寫入 24h 快取。"""
+    async def garbage_results(self, params, max_results):
+        return [{"case_id": "iframe chrome", "jid": ""}]
+    monkeypatch.setattr(JudicialSearchClient, "_keyword_search_http", garbage_results)
+    monkeypatch.setattr(JudicialSearchClient, "_rate_limit", _no_rate_limit)
+
+    writes: list = []
+
+    async def record_set(self, params, data):
+        writes.append(data)
+    monkeypatch.setattr(type(cache), "set_search", record_set)
+
+    result = await client.search(keyword="test")
+    assert result["success"] is True
+    assert result["results"] == [{"case_id": "iframe chrome", "jid": ""}]
+    assert writes == [], "沒 jid 的 parser 輸出不可進 24h 快取"
+
+
+@pytest.mark.asyncio
+async def test_search_writes_cache_when_jids_look_valid(client, cache, monkeypatch):
+    """jid 符合格式時正常寫快取。"""
+    async def good_results(self, params, max_results):
+        return [{"jid": "TPSV,104,台上,472,20150326,1", "case_id": "..."}]
+    monkeypatch.setattr(JudicialSearchClient, "_keyword_search_http", good_results)
+    monkeypatch.setattr(JudicialSearchClient, "_rate_limit", _no_rate_limit)
+
+    writes: list = []
+
+    async def record_set(self, params, data):
+        writes.append(data)
+    monkeypatch.setattr(type(cache), "set_search", record_set)
+
+    result = await client.search(keyword="test")
+    assert result["success"] is True
+    assert len(writes) == 1
+
+
+@pytest.mark.asyncio
+async def test_precise_path_also_gates_cache_on_jid(client, cache, monkeypatch):
+    """precise 案號路徑也要 gate cache。parser 若回垃圾不可入 24h 快取。"""
+    async def garbage_precise(self, params, max_results):
+        return [{"case_id": "junk", "jid": ""}]
+    monkeypatch.setattr(JudicialSearchClient, "_precise_search_http", garbage_precise)
+    monkeypatch.setattr(JudicialSearchClient, "_rate_limit", _no_rate_limit)
+
+    writes: list = []
+
+    async def record_set(self, params, data):
+        writes.append(data)
+    monkeypatch.setattr(type(cache), "set_search", record_set)
+
+    result = await client.search(case_word="台上", case_number="123")
+    assert result["success"] is True
+    assert writes == []
+
+
+@pytest.mark.asyncio
 async def test_search_waf_permanent_block_gives_dedicated_message(client, monkeypatch):
     """WAFPermanentBlockError 要分流到 WAF 訊息，不是通用 / HTTPError。"""
     async def boom(self, params, max_results):

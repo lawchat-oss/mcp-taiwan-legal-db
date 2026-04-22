@@ -32,6 +32,8 @@ from tenacity import (
     wait_exponential,
 )
 
+from mcp_server.tools._errors import error_response
+
 BASE = "https://cons.judicial.gov.tw"
 TIMEOUT = 15.0
 
@@ -279,17 +281,16 @@ def _sanity_check(
     """若解析明顯失敗回錯誤 dict；否則 None。"""
     missing = [f for f in critical if not parsed.get(f)]
     if len(parsed) < MIN_FIELDS or missing:
-        return {
-            "success": False,
-            "error": "parse_failed",
-            "fields_missing": missing,
-            "fields_found": sorted(parsed.keys()),
-            "source_url": source_url,
-            "hint": (
+        return error_response(
+            "parse_failed",
+            fields_missing=missing,
+            fields_found=sorted(parsed.keys()),
+            source_url=source_url,
+            hint=(
                 "官方網站 DOM 結構可能變動，或頁面非預期格式。"
                 "請回報 constitutional-court MCP 維護者檢查 parser。"
             ),
-        }
+        )
     return None
 
 
@@ -586,7 +587,7 @@ def get_interpretation(
     try:
         system, number, year = _parse_case_id(case_id)
     except ValueError as e:
-        return {"success": False, "error": str(e)}
+        return error_response(str(e), case_id=case_id)
 
     if system == "釋字":
         return _get_old_interpretation(
@@ -605,7 +606,7 @@ def _get_old_interpretation(
     opinions_keyword: str,
 ) -> dict:
     if number <= 0:
-        return {"success": False, "error": f"號次必須為正整數（收到 {number}）"}
+        return error_response(f"號次必須為正整數（收到 {number}）")
 
     # 嘗試從本地快取回傳（離線 + 快速路徑）
     # 若 cached 含 reasoning/opinions 全文，opt-in 欄位也可從快取服務
@@ -643,22 +644,21 @@ def _get_old_interpretation(
     try:
         r = _fetch(f"{BASE}/jcc/zh-tw/jep03/show", params={"expno": str(number)})
     except httpx.HTTPError as e:
-        return {"success": False, "error": f"HTTP 錯誤：{e}"}
+        return error_response(f"HTTP 錯誤：{e}")
     except _TransientError as e:
-        return {"success": False, "error": f"官方站暫時不可用（已重試 3 次）：{e}"}
+        return error_response(f"官方站暫時不可用（已重試 3 次）：{e}")
 
     # 軟邊界：無效 expno 會 redirect 到 index.aspx；靠最終 URL 判斷
     final_url = str(r.url)
     if r.status_code != 200 or "docdata.aspx" not in final_url:
-        return {
-            "success": False,
-            "error": f"查無釋字第 {number} 號",
-            "final_url": final_url,
-            "hint": (
+        return error_response(
+            f"查無釋字第 {number} 號",
+            final_url=final_url,
+            hint=(
                 "舊制釋字官方已公告之最後一號為第 813 號（民國 110.12.24）。"
                 "若要查新制憲法法庭裁判請以「N年憲判字第M號」格式傳 case_id。"
             ),
-        }
+        )
 
     parsed = _parse_doc_page(r.text)
     sanity = _sanity_check(parsed, OLD_CRITICAL, final_url)
@@ -702,10 +702,9 @@ def _get_new_ruling(
     opinions_keyword: str,
 ) -> dict:
     if number <= 0 or year <= 0:
-        return {
-            "success": False,
-            "error": f"號次與年度必須為正整數（收到 year={year}, number={number}）",
-        }
+        return error_response(
+            f"號次與年度必須為正整數（收到 year={year}, number={number}）"
+        )
 
     # 嘗試從本地快取回傳（離線 + 快速路徑）
     kw_r = (reasoning_keyword or "").strip()
@@ -746,28 +745,27 @@ def _get_new_ruling(
     try:
         mapping = _load_new_listing()
     except (httpx.HTTPError, _TransientError) as e:
-        return {"success": False, "error": f"載入憲判字列表失敗：{e}"}
+        return error_response(f"載入憲判字列表失敗：{e}")
 
     key = (year, number)
     if key not in mapping:
         avail_years = sorted({y for y, _ in mapping.keys()})
-        return {
-            "success": False,
-            "error": f"查無 {year} 年憲判字第 {number} 號",
-            "available_years": avail_years,
-            "hint": "新制憲判字自民國 111 年起，每年號次獨立計算。",
-        }
+        return error_response(
+            f"查無 {year} 年憲判字第 {number} 號",
+            available_years=avail_years,
+            hint="新制憲判字自民國 111 年起，每年號次獨立計算。",
+        )
 
     doc_id = mapping[key]
     try:
         r = _fetch(f"{BASE}/docdata.aspx", params={"fid": "38", "id": doc_id})
     except httpx.HTTPError as e:
-        return {"success": False, "error": f"HTTP 錯誤：{e}"}
+        return error_response(f"HTTP 錯誤：{e}")
     except _TransientError as e:
-        return {"success": False, "error": f"官方站暫時不可用（已重試 3 次）：{e}"}
+        return error_response(f"官方站暫時不可用（已重試 3 次）：{e}")
 
     if r.status_code != 200:
-        return {"success": False, "error": f"取得裁判頁失敗 (HTTP {r.status_code})"}
+        return error_response(f"取得裁判頁失敗 (HTTP {r.status_code})")
 
     parsed = _parse_doc_page(r.text)
     sanity = _sanity_check(parsed, NEW_CRITICAL, str(r.url))
@@ -835,7 +833,7 @@ def get_citations(
     try:
         system, number, year = _parse_case_id(case_id)
     except ValueError as e:
-        return {"success": False, "error": str(e)}
+        return error_response(str(e), case_id=case_id)
 
     text, truncated, err = _get_reasoning_text(system, number, year)
     if err is not None:
