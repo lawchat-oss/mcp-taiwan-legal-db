@@ -100,7 +100,14 @@ class JudicialSearchClient:
             }
 
         # ── 精確案號搜尋：case_word + case_number → HTTP GET（快、準） ──
-        if params.get("case_word") and params.get("case_number"):
+        # 只有在沒有全文/主文過濾條件時才可安全走 fast path；
+        # 否則會忽略 keyword / main_text 並把錯結果寫進快取。
+        if (
+            params.get("case_word")
+            and params.get("case_number")
+            and not params.get("keyword")
+            and not params.get("main_text")
+        ):
             http_results = await self._precise_search_http(params, max_results)
             if http_results is not None:
                 data = {
@@ -134,11 +141,30 @@ class JudicialSearchClient:
 
             return data
 
-        except Exception as e:
-            logger.error("搜尋失敗: %s", e)
+        except (asyncio.TimeoutError, httpx.TimeoutException):
+            # httpx 的 timeout 實際型別是 httpx.TimeoutException（HTTPError 子類），
+            # 必須在 httpx.HTTPError arm 之前攔截。asyncio.TimeoutError 涵蓋
+            # waf_bypass 收斂上來的 Playwright warmup 逾時。
+            logger.exception("搜尋逾時")
             return {
                 "success": False,
-                "error": str(e),
+                "error": "搜尋逾時，請稍後重試或縮小查詢範圍",
+                "query": params,
+                "timestamp": datetime.now().isoformat(),
+            }
+        except httpx.HTTPError:
+            logger.exception("搜尋連線失敗")
+            return {
+                "success": False,
+                "error": "連線司法院網站失敗，請稍後重試",
+                "query": params,
+                "timestamp": datetime.now().isoformat(),
+            }
+        except Exception:
+            logger.exception("搜尋發生未預期錯誤")
+            return {
+                "success": False,
+                "error": "搜尋發生未預期錯誤，請查看 server log 取得詳細資訊",
                 "query": params,
                 "timestamp": datetime.now().isoformat(),
             }
