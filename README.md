@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/lawchat-oss-mcp-taiwan-legal-db-badge.png)](https://mseep.ai/app/lawchat-oss-mcp-taiwan-legal-db)
+
 # mcp-taiwan-legal-db
 
 [English](README.en.md) · **繁體中文**
