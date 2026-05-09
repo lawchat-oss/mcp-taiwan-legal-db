@@ -564,7 +564,7 @@ def _load_known_statute_names() -> set[str]:
     pcode_path = Path(__file__).resolve().parent.parent / "data" / "pcode_all.json"
     names = set()
     try:
-        with open(pcode_path, "r") as f:
+        with open(pcode_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         names = set(data["pcode_map"].keys())
     except (FileNotFoundError, KeyError):
