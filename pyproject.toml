@@ -48,7 +48,6 @@ mcp-taiwan-legal-db = "mcp_server.server:mcp.run"
 [project.urls]
 Homepage = "https://github.com/lawchat-oss/mcp-taiwan-legal-db"
 Issues = "https://github.com/lawchat-oss/mcp-taiwan-legal-db/issues"
-Company = "https://lawchat.com.tw"
 
 [build-system]
 requires = ["setuptools>=61.0"]

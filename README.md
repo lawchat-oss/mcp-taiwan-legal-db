@@ -1,6 +1,6 @@
 # mcp-taiwan-legal-db
 
-[English](README.en.md) · **繁體中文**
+[English](https://github.com/lawchat-oss/mcp-taiwan-legal-db/blob/main/README.en.md) · **繁體中文**
 
 台灣法規、裁判書、憲法法庭裁判 — MCP Server。
 

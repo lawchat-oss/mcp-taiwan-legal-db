@@ -1,6 +1,6 @@
 # mcp-taiwan-legal-db
 
-**English** · [繁體中文](README.md)
+**English** · [繁體中文](https://github.com/lawchat-oss/mcp-taiwan-legal-db/blob/main/README.md)
 
 A Model Context Protocol (MCP) server that gives any MCP-compatible AI assistant direct access to Taiwan (ROC) legal databases:
 
