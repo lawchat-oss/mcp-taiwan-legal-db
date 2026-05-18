@@ -141,6 +141,12 @@ Returns the agent's public agent card. The card describes who the agent
 is, what it can do, and how to talk to it. Any A2A-aware client should
 fetch this first.
 
+**Example request:**
+
+```bash
+curl -s http://localhost:3773/.well-known/agent.json | jq
+```
+
 **Example response (abridged):**
 
 ```json
@@ -179,6 +185,12 @@ Identifier (DID), which uniquely identifies this agent instance.
 ### `GET /health`
 
 Returns a small JSON health-check payload. Useful for liveness probes.
+
+**Example request:**
+
+```bash
+curl -s http://localhost:3773/health | jq
+```
 
 **Example response:**
 
@@ -252,6 +264,31 @@ must be valid UUIDs. The `contextId` should be reused across requests
 that belong to the same conversation; a fresh `taskId` is used for each
 new question.
 
+**Example request (concrete UUIDs filled in):**
+
+```bash
+curl -s -X POST http://localhost:3773 \
+  -H 'content-type: application/json' \
+  -d '{
+    "jsonrpc": "2.0",
+    "id":        "f3e6a1e2-1b3c-4ad5-8f5e-9c4ad5b3f3a1",
+    "method":    "message/send",
+    "params": {
+      "configuration": { "acceptedOutputModes": ["text/plain"] },
+      "message": {
+        "role":      "user",
+        "messageId": "8c1c2f9e-71b4-47e8-9a0b-3b6f9b6f1c2a",
+        "contextId": "5b9b3c4d-22ef-4f10-87f8-2a1b9b8c7d6e",
+        "taskId":    "7d9e1c2b-aaaa-4f00-bbbb-1234567890ab",
+        "kind":      "message",
+        "parts": [
+          { "kind": "text", "text": "釋字 748 解釋日期？一句話。" }
+        ]
+      }
+    }
+  }' | jq
+```
+
 **Response body (the task has been accepted but is not finished yet):**
 
 ```json
@@ -285,6 +322,21 @@ state.
     "taskId": "<the taskId returned from message/send>"
   }
 }
+```
+
+**Example request (using the `taskId` from the `message/send` example above):**
+
+```bash
+curl -s -X POST http://localhost:3773 \
+  -H 'content-type: application/json' \
+  -d '{
+    "jsonrpc": "2.0",
+    "id":      "9e8d7c6b-5a4b-3c2d-1e0f-abcdef012345",
+    "method":  "tasks/get",
+    "params": {
+      "taskId": "7d9e1c2b-aaaa-4f00-bbbb-1234567890ab"
+    }
+  }' | jq
 ```
 
 **Response body when the task is finished:**
