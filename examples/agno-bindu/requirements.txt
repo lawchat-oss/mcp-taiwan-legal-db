@@ -1,0 +1,23 @@
+# Additional packages required by this example.
+# The MCP server itself comes from the parent repository, installed via
+# `pip install -e .` from the repo root (see top-level README, "Development setup").
+
+# Bindu — exposes the agent over the Agent-to-Agent (A2A) protocol.
+bindu>=2026.20
+
+# agno — the agent loop (LLM tool-calling, conversation memory).
+agno>=2.6,<3
+
+# Model client. OpenRouter exposes an OpenAI-compatible HTTP API, so this
+# is the only client library the example needs.
+openai>=1.40
+
+# Used by agno for the lightweight on-disk conversation store.
+sqlalchemy>=2
+aiosqlite>=0.20
+
+# Loads the local .env file at startup.
+python-dotenv>=1.0
+
+# Pretty terminal output for the one-shot CLI runner (cli.py).
+rich>=13

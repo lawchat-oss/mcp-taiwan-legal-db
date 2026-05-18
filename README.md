@@ -344,6 +344,24 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 
 ---
 
+## 在這個 server 上面建 agent
+
+如果你想用自主 agent 來驅動這些工具，而不是透過 Claude 桌面客戶端
+（例如：把台灣法律研究包成可以被其他軟體系統呼叫的網路服務），
+請見 [`examples/agno-bindu/`](examples/agno-bindu/) 範例。
+
+這個範例使用 [Bindu](https://github.com/GetBindu/Bindu) 把本 MCP server
+包成一個對外可達的 agent，透過
+[Agent-to-Agent JSON-RPC 協定](https://github.com/google-a2a/A2A) 提供服務，
+並附有一組密碼學身分（Decentralized Identifier，DID）與公開的 agent card。
+範例由 Bindu 團隊貢獻 — 我們正在為中小企業打造 compliance operating
+system，本 MCP server 是我們整合進去的第一個法律一手資料來源。
+
+完整的 API reference（每個 endpoint 的 request / response 結構）寫在
+[`examples/agno-bindu/README.md`](examples/agno-bindu/README.md) 裡。
+
+---
+
 ## 疑難排解
 
 **`ModuleNotFoundError: No module named 'mcp_server'`**
