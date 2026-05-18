@@ -1,0 +1,7 @@
+.env
+tmp/
+logs/
+.bindu/
+__pycache__/
+*.pyc
+.venv/
