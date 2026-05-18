@@ -174,16 +174,41 @@ fetch this first.
 ```
 
 The `extensions[].uri` field contains the agent's Decentralized
-Identifier, which uniquely identifies this agent instance.
-
-### `GET /.well-known/did.json`
-
-Returns the full DID document for the agent. Useful for clients that
-need to verify the agent's cryptographic identity.
+Identifier (DID), which uniquely identifies this agent instance.
 
 ### `GET /health`
 
-Returns a small health-check payload. Useful for liveness probes.
+Returns a small JSON health-check payload. Useful for liveness probes.
+
+**Example response:**
+
+```json
+{
+  "version": "2026.20.3",
+  "health": "healthy",
+  "runtime": {
+    "storage_backend": "InMemoryStorage",
+    "scheduler_backend": "InMemoryScheduler",
+    "task_manager_running": true,
+    "strict_ready": true
+  },
+  "application": {
+    "penguin_id": "2d5b0908-4384-bb67-8c8c-3c2801999e96",
+    "agent_did": "did:bindu:you_at_example_com:lex-taiwan:2d5b0908-4384-bb67-8c8c-3c2801999e96"
+  },
+  "system": {
+    "python_version": "3.14.2",
+    "platform": "Darwin",
+    "environment": "development"
+  },
+  "status": "ok",
+  "ready": true,
+  "uptime_seconds": 12.3
+}
+```
+
+The `application.agent_did` field is the same DID returned in the
+agent card.
 
 ### `POST /` (JSON-RPC 2.0)
 
