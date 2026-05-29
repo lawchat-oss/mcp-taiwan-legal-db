@@ -475,4 +475,6 @@ This is an **unofficial** tool for querying publicly-available Taiwan legal data
 
 The data returned by this tool reflects the state of the upstream official sources at the time of query. It may be cached (see TTLs above), and **must not be treated as legal advice or a substitute for the authoritative official sources**. Always verify against the original sources before relying on the data for any legal or official purpose.
 
+**Building on top of this server.** This project is a data-access layer for public Taiwan legal sources. Any agent, application, or service built on top of it — including the examples under [`examples/`](examples/) — is responsible for its own behavior, output accuracy, and user-facing claims.
+
 本工具為非官方的台灣公開法規資料查詢工具，與司法院、法務部或任何台灣政府機關無隸屬關係。查詢結果以上游官方資料庫當下狀態為準，不得作為法律意見或正式用途依據，使用前請向官方資料庫驗證。
