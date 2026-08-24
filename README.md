@@ -126,6 +126,7 @@ Tools: ['search_judgments', 'get_judgment', 'query_regulation', 'get_pcode', 'se
 - **裁判主文篩選**：`main_text="被告應將 移轉"` + `keyword="借名登記"` → 找被告敗訴的借名登記案
 - 可依 `court`、`case_type`（民事／刑事／行政／懲戒）、`year_from`／`year_to` 過濾
 - 結果自動依法院層級排序（最高 → 高等 → 地方）
+- **資料涵蓋範圍**：民國 89 年（2000）起接近完整，81–88 年（1992–1999）僅零星收錄，80 年（1991）以前查無。這是司法院系統本身的收錄範圍，本工具不做任何年份裁切
 
 **重要**：要查某個特定案號時，**一定**要用 `case_word`+`case_number`，不要放進 `keyword`。
 
@@ -394,6 +395,8 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 | 全國法規資料庫 | law.moj.gov.tw | 法規條文與修法沿革（`LawClass/*`） |
 
 `mcp_server/config.py:ALLOWED_DOMAINS` 以硬編碼 allow-list 強制執行（即上列兩個網域），伺服器會拒絕任何不在清單內的 URL。
+
+**裁判書年份涵蓋範圍**：本工具即時代理司法院系統，沒有自己的資料庫，有效年份 = 司法院收錄範圍。實測（以「竊盜」為關鍵字計數）民國 89 年（2000）起每年數萬筆，81–88 年（1992–1999）合計約 2,000 筆，80 年（1991）以前為零。司法院公告其開放資料檔「收錄範圍與裁判書查詢系統相同」，因此沒有更早的公開來源。查詢 2000 年以前的裁判請預期查無或零星。
 
 憲法法庭資料（釋字／憲判字）**不在查詢時連網取得** — 它是離線打包的（`old_cases.json`／`new_cases.json`），來源為 `cons.judicial.gov.tw`，由維護腳本離線重建。詳見 [SOURCES.md](SOURCES.md)。
 
