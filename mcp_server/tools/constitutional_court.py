@@ -453,7 +453,11 @@ def _attach_opinions(
             result["opinions_unavailable"] = True
             result["opinions_hint"] = f"找不到標題含「{document}」的意見書，請從 opinion_documents 的 title 挑選字串。"
             return
-    text = "\n\n".join(f"【{d['title']}】\n{d['text']}" for d in docs if d["text"])
+    text = "\n\n".join(
+        f"【{d['title']}】" + ("（本份由 PDF 頁面影像轉錄，〔?〕為無法辨識之字，引用前請核對官網 PDF）" if d.get("transcribed") else "")
+        + f"\n{d['text']}"
+        for d in docs if d["text"]
+    )
     _attach_long_field(result, text, "opinions", include_full or bool(document), keyword)
 
 
@@ -618,7 +622,8 @@ def get_interpretation(
     - 何時用：需看完整協同/不同意見書時
     - 絕對不能因預設層沒看到就斷言學生捏造——意見書是真實存在的文件，只是不具拘束力
     - 回傳會附 `opinion_documents`：每份意見書的 title、authors（提出者）、joined（加入者）、
-      type（協同／部分協同／不同／部分不同…）、url（官網 PDF）、chars（0 表示無法擷取電子文字，只能看 url）
+      type（協同／部分協同／不同／部分不同…）、url（官網 PDF）、chars（0 表示無法擷取電子文字，只能看 url）；
+      transcribed=true 表示該份 PDF 無法擷取文字、改由頁面影像轉錄，引用前應核對官網 PDF
 
     🎯 opinion_document（預設 ""）：只取標題含此字串的意見書全文，例如 `opinion_document="許宗力"`
     - 何時用：意見書合計超過安全閥、要讀其中一位大法官的完整意見時

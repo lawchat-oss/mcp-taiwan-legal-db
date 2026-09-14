@@ -8,8 +8,9 @@ old_cases.json / new_cases.json 補上 has_opinions 與 opinion_documents。
 
 只收大法官意見書（排除鑑定人、學者、法庭之友、聲請人、機關等提交的「意見書」）。
 同一案若同時有「抄本」合訂本（含解釋文、理由書、聲請書）與單份意見書，只取單份；
-只有抄本的案件才取抄本，但若網頁本身已有意見書內文（如釋字 499 號），保留網頁內文不用抄本。部分 PDF 的字型缺少字元對照表，抽出來是亂碼，這類不打包，
-只在 opinion_documents 標 extracted=false 並保留附件連結。
+只有抄本的案件才取抄本，但若網頁本身已有意見書內文（如釋字 499 號），保留網頁內文不用抄本。部分 PDF 的字型缺少字元對照表（或頁面是圖片），抽不出文字；這類改用
+scripts/opinion_transcripts/<網址 sha1>.txt 的人工／影像轉錄稿，並標 transcribed=true。
+沒有轉錄稿的仍只保留附件連結（chars=0）。
 
 Usage (repo root):
     uv run --no-project --with httpx --with pypdf python scripts/build_opinions.py [--cache DIR]
@@ -35,6 +36,7 @@ from urllib.parse import urljoin
 import httpx
 
 DATA = Path(__file__).resolve().parent.parent / "mcp_server" / "data"
+TRANSCRIPTS = Path(__file__).resolve().parent / "opinion_transcripts"
 UA = "mcp-taiwan-legal-db data build (github.com/lawchat-oss/mcp-taiwan-legal-db)"
 CJK = "\u3000-\u303f\u4e00-\u9fff\uff00-\uffef"  # CJK punctuation, ideographs, fullwidth forms
 # 標題含「意見書」但不是大法官意見書的附件（鑑定、法庭之友、聲請、機關陳述等）
@@ -143,8 +145,11 @@ def main() -> None:
             time.sleep(0.7)
 
     # 2. 下載 PDF（3 條連線，快取於 pdf/<sha1>.bin）
+    def url_hash(url: str) -> str:
+        return hashlib.sha1(url.encode()).hexdigest()
+
     def pdf_path(url: str) -> Path:
-        return args.cache / "pdf" / (hashlib.sha1(url.encode()).hexdigest() + ".bin")
+        return args.cache / "pdf" / (url_hash(url) + ".bin")
 
     def download(url: str) -> None:
         p = pdf_path(url)
@@ -194,7 +199,12 @@ def main() -> None:
                 if text and len(re.findall(r"[\u4e00-\u9fff]", text)) < MIN_CJK_RATIO * len(text):
                     print(f"garbled, skipped: {cid} {a['title']}")
                     text = ""
-                docs.append({"title": a["title"], "url": a["url"], "text": text})
+                doc = {"title": a["title"], "url": a["url"], "text": text}
+                transcript = TRANSCRIPTS / f"{url_hash(a['url'])}.txt"
+                if not text and transcript.exists():
+                    doc["text"] = COMPAT_HAN.sub(lambda m: unicodedata.normalize("NFKC", m.group()), transcript.read_text(encoding="utf-8").strip())
+                    doc["transcribed"] = True
+                docs.append(doc)
             stats["cases"] += 1
             stats["documents"] += len(docs)
             stats["extracted"] += sum(1 for d in docs if d["text"])
@@ -204,7 +214,8 @@ def main() -> None:
             case["opinions"] = ""  # 舊資料在此欄只有附件標題；全文改由 opinions.zip 提供
             case["has_opinions"] = any(d["text"] for d in docs)
             case["opinion_documents"] = [
-                {"title": d["title"], **parse_opinion_title(d["title"]), "url": d["url"], "chars": len(d["text"])}
+                {"title": d["title"], **parse_opinion_title(d["title"]), "url": d["url"], "chars": len(d["text"]),
+                 **({"transcribed": True} if d.get("transcribed") else {})}
                 for d in docs
             ]
 

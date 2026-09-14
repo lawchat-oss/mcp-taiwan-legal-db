@@ -70,11 +70,13 @@ def test_opinion_keyword_finds_text_inside_pdf():
     assert r["opinions_match_count"] > 0
 
 
-def test_garbled_pdf_is_listed_but_not_extracted():
-    """字型無法解碼的 PDF 不打包亂碼，只留連結（chars=0）。"""
-    r = cc.get_interpretation("釋字第735號", opinion_document="林大法官俊益")
+def test_undecodable_pdf_uses_labelled_transcription():
+    """字型無法解碼的 PDF 不打包亂碼；改用頁面影像轉錄稿，並標註 transcribed 與核對提醒。"""
+    r = cc.get_interpretation("釋字第735號", opinion_document="林俊益")
     doc = next(d for d in r["opinion_documents"] if "林大法官俊益" in d["title"])
-    assert doc["chars"] == 0 and doc["url"]
+    assert doc["transcribed"] and doc["chars"] > 5000 and doc["url"]
+    assert "頁面影像轉錄" in r["opinions"].split("\n", 1)[0]
+    assert "林俊益" in r["opinions"]
 
 
 def test_constitutional_judgment_opinions_bundled():

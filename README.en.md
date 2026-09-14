@@ -449,9 +449,9 @@ The Constitutional Court corpus (釋字 / 憲判字) is **not** fetched at query
 |---------|---------|----------------|---------------|------|
 | Grand Justices interpretations (`old_cases.json`) | 813 | 734 | 472 | 7.4 MB |
 | Constitutional Court judgments (`new_cases.json`) | 55 | 55 | 54 | 1.8 MB |
-| Justices' opinions, full text (`opinions.zip`) | 1,536 documents | — | 1,515 with extracted text | 10.6 MB |
+| Justices' opinions, full text (`opinions.zip`) | 1,536 documents | — | 1,535 with full text | 10.7 MB |
 
-From 釋字 No. 401 onward, and for all 憲判字, the official site publishes Justices' opinions only as PDF attachments. Their text is extracted and bundled in `opinions.zip`; responses include `opinion_documents` with each opinion's title, official PDF link and character count. 21 PDFs use fonts that cannot be decoded (mostly some opinions in 釋字 Nos. 735–753) and are kept as links only. Rebuild with `scripts/build_opinions.py`.
+From 釋字 No. 401 onward, and for all 憲判字, the official site publishes Justices' opinions only as PDF attachments. Their text is extracted and bundled in `opinions.zip`; responses include `opinion_documents` with each opinion's title, official PDF link and character count. 21 PDFs use fonts that cannot be decoded or contain page images (mostly some opinions in 釋字 Nos. 735–753); 20 of them were transcribed verbatim from the page images (flagged `transcribed`; check the official PDF before quoting), and the partially dissenting opinion by Justice 吳陳鐶 in 釋字 No. 777 is kept as a link only. The Constitutional Court's published PDFs are treated as authoritative; the National Regulations Database carries later-edited versions of earlier opinions (normalized wording, corrected typos, party names redacted), so wording may differ slightly. Rebuild with `scripts/build_opinions.py`.
 
 ## Caching
 
@@ -500,7 +500,7 @@ mcp-taiwan-legal-db/
     │   ├── law_histories.json      # Amendment history (bundled, ~9.6 MB)
     │   ├── old_cases.json          # 813 Grand Justices interpretations, full text (bundled, ~7.4 MB)
     │   ├── new_cases.json          # 55 Constitutional Court judgments, full text (bundled, ~1.8 MB)
-    │   └── opinions.zip            # Justices' opinions extracted from official PDFs (bundled, ~10.6 MB)
+    │   └── opinions.zip            # Justices' opinions extracted from official PDFs (bundled, ~10.7 MB)
     ├── models/            # Judgment / Regulation dataclasses
     ├── parsers/           # HTML parsers for judgment and regulation pages
     ├── tools/
