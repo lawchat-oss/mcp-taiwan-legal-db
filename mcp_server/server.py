@@ -1,10 +1,10 @@
-"""台灣法律資料庫 MCP Server — FastMCP 入口"""
+"""台灣法律資料庫 MCP Server — MCPServer 入口"""
 
 import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from mcp_server.cache.db import CacheDB
 from mcp_server.tools._errors import error_response
@@ -66,7 +66,7 @@ def _log_background_task_exception(task: asyncio.Task) -> None:
 
 
 @asynccontextmanager
-async def lifespan(server: FastMCP):
+async def lifespan(server: MCPServer):
     """伺服器生命週期：啟動時初始化，關閉時清理"""
     global cache, reg_client, jud_search, jud_doc, waf
 
@@ -103,8 +103,8 @@ async def lifespan(server: FastMCP):
     logger.info("MCP Server 已關閉")
 
 
-# 建立 FastMCP 伺服器
-mcp = FastMCP(
+# 建立 MCPServer 伺服器
+mcp = MCPServer(
     name="台灣法律資料庫",
     instructions=(
         "查詢司法院裁判書、全國法規資料庫、大法官解釋（釋字）與憲法法庭裁判（憲判字）的 MCP 工具。"
