@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import re
 import time
+import zipfile
 from pathlib import Path
 from typing import Optional
 
@@ -56,7 +57,7 @@ MIN_FIELDS = 3
 OLD_CRITICAL = ("解釋字號", "解釋文")
 NEW_CRITICAL = ("判決字號", "主文", "理由")
 
-# 舊制釋字的意見書欄位，官方站的 title 是「意見書、抄本等文件」
+# 舊制釋字的意見書欄位：釋字 736 號以前官方站 title 是「意見書、抄本等文件」，737 號起改為「意見書」
 OLD_OPINIONS_KEY = "意見書、抄本等文件"
 NEW_OPINIONS_KEY = "意見書"
 
@@ -83,6 +84,8 @@ _old_cases: Optional[dict[str, dict]] = None  # key: str(number), value: all def
 _new_cases: Optional[dict[str, dict]] = None  # key: "year_number", value: all default-layer fields
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
+# 意見書全文（由官網 PDF 附件擷取，scripts/build_opinions.py 產生）。每案一個 member，查詢時才讀。
+_OPINIONS_ZIP = _DATA_DIR / "opinions.zip"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -402,6 +405,58 @@ def _is_substantive(text: str) -> bool:
     return bool(text) and len(text.strip()) >= SUBSTANTIVE_THRESHOLD
 
 
+def _bundled_opinions(member: str) -> Optional[dict]:
+    """讀 opinions.zip 中單一案件（member 如 "old/758"）的意見書 {"documents": [{title, url, text}, ...]}；無資料回 None。"""
+    if not _OPINIONS_ZIP.exists():
+        return None
+    with zipfile.ZipFile(_OPINIONS_ZIP) as zf:
+        try:
+            return json.loads(zf.read(f"{member}.json"))
+        except KeyError:
+            return None
+
+
+def _attach_html_opinions(result: dict, text: str, include_full: bool, keyword: str, document: str) -> None:
+    """沒有 PDF 擷取資料時的意見書（早期釋字的網頁內文，或打包後才公布、走 live 查詢的新案）。
+
+    整段文字無法可靠切成單份；指定 document 時，姓名有出現在內文才回傳，否則明確回報找不到。
+    """
+    document = (document or "").strip()
+    if document and document not in text:
+        result["opinions_unavailable"] = True
+        result["opinions_hint"] = f"該案意見書中找不到「{document}」。"
+        return
+    _attach_long_field(result, text, "opinions", include_full or bool(document), keyword)
+
+
+def _attach_opinions(
+    result: dict, cached: dict, member: str, include_full: bool, keyword: str, document: str = ""
+) -> None:
+    """快取路徑的意見書：PDF 擷取全文優先，其次 case JSON 內的 HTML 意見書；並附上附件清單。
+
+    document 非空時只取標題含該字串的意見書（例如大法官姓名），讓單份長文不被其他意見書擠出安全閥。
+    """
+    document = (document or "").strip()
+    if not (include_full or keyword or document):
+        return
+    if cached.get("opinion_documents"):
+        result["opinion_documents"] = cached["opinion_documents"]
+    bundled = _bundled_opinions(member)
+    if not bundled:
+        _attach_html_opinions(result, cached.get("opinions", ""), include_full, keyword, document)
+        return
+    docs = bundled["documents"]
+    if document:
+        # 官網標題把姓名拆成「許大法官宗力」，比對時也試去掉「大法官」後的字串
+        docs = [d for d in docs if document in d["title"] or document in d["title"].replace("大法官", "")]
+        if not docs:
+            result["opinions_unavailable"] = True
+            result["opinions_hint"] = f"找不到標題含「{document}」的意見書，請從 opinion_documents 的 title 挑選字串。"
+            return
+    text = "\n\n".join(f"【{d['title']}】\n{d['text']}" for d in docs if d["text"])
+    _attach_long_field(result, text, "opinions", include_full or bool(document), keyword)
+
+
 def _extract_citations(text: str) -> list[dict]:
     """從裁判全文中抽取所有被引用的案件字號，回傳去重排序後的清單。
 
@@ -484,10 +539,10 @@ def _attach_long_field(
         result[f"{field_name}_unavailable"] = True
         result[f"{field_name}_full_length"] = raw_len
         result[f"{field_name}_hint"] = (
-            f"該案的 {field_name} 欄位實際內容僅 {raw_len} 字，"
-            "疑為 OCR 掃描檔 placeholder（常見於極早期釋字）。"
-            "官方網站未收錄實質電子版，若需原文請人工查閱司法院網站。"
-            "LLM 不應據此認定「該案無相關論述」——該案可能在紙本原件中有論述。"
+            f"該案的 {field_name} 沒有可用的電子全文（實際內容僅 {raw_len} 字）。"
+            "可能是該案沒有此類文件、只有掃描圖檔，或文件僅以附件形式公開。"
+            "若回傳含 opinion_documents，可依其中的附件連結查閱原文；否則請查閱 source_url。"
+            "LLM 不應據此認定「該案無相關論述」。"
         )
         return
 
@@ -522,6 +577,7 @@ def get_interpretation(
     reasoning_keyword: str = "",
     include_opinions: bool = False,
     opinions_keyword: str = "",
+    opinion_document: str = "",
 ) -> dict:
     """取得司法院大法官解釋 / 憲法法庭裁判全文（分層回傳，支援關鍵字片段模式）。
 
@@ -561,6 +617,11 @@ def get_interpretation(
     🔴 include_opinions（預設 False，全文模式）：取得「意見書」全文
     - 何時用：需看完整協同/不同意見書時
     - 絕對不能因預設層沒看到就斷言學生捏造——意見書是真實存在的文件，只是不具拘束力
+    - 回傳會附 `opinion_documents`：每份意見書的 title、authors（提出者）、joined（加入者）、
+      type（協同／部分協同／不同／部分不同…）、url（官網 PDF）、chars（0 表示無法擷取電子文字，只能看 url）
+
+    🎯 opinion_document（預設 ""）：只取標題含此字串的意見書全文，例如 `opinion_document="許宗力"`
+    - 何時用：意見書合計超過安全閥、要讀其中一位大法官的完整意見時
 
     ⚠️ 平行呼叫限制：若同一 turn 需查多個解釋，一律先用預設值抓全部，評估後再對
     「最關鍵的一個」發第二次呼叫。**絕對不要對多個解釋同時開啟全文模式**。若真要
@@ -576,6 +637,7 @@ def get_interpretation(
         reasoning_keyword: 若非空，在理由書中搜尋該關鍵字並回片段（覆蓋 include_reasoning）
         include_opinions: 是否回傳「意見書」全文
         opinions_keyword: 若非空，在意見書中搜尋該關鍵字並回片段（覆蓋 include_opinions）
+        opinion_document: 若非空，只取標題含此字串的意見書（例如大法官姓名）
 
     Returns:
         成功：success=True 與預設層欄位，加上：
@@ -591,10 +653,12 @@ def get_interpretation(
 
     if system == "釋字":
         return _get_old_interpretation(
-            number, include_reasoning, reasoning_keyword, include_opinions, opinions_keyword
+            number, include_reasoning, reasoning_keyword, include_opinions, opinions_keyword,
+            opinion_document,
         )
     return _get_new_ruling(
-        year, number, include_reasoning, reasoning_keyword, include_opinions, opinions_keyword
+        year, number, include_reasoning, reasoning_keyword, include_opinions, opinions_keyword,
+        opinion_document,
     )
 
 
@@ -604,6 +668,7 @@ def _get_old_interpretation(
     reasoning_keyword: str,
     include_opinions: bool,
     opinions_keyword: str,
+    opinion_document: str = "",
 ) -> dict:
     if number <= 0:
         return error_response(f"號次必須為正整數（收到 {number}）")
@@ -638,7 +703,7 @@ def _get_old_interpretation(
                 "source_url": cached.get("source_url") or f"{BASE}/jcc/zh-tw/jep03/show?expno={number}",
             }
             _attach_long_field(result, cached.get("reasoning", ""), "reasoning", include_reasoning, kw_r)
-            _attach_long_field(result, cached.get("opinions", ""), "opinions", include_opinions, kw_o)
+            _attach_opinions(result, cached, "old/" + str(number), include_opinions, kw_o, opinion_document)
             return result
 
     try:
@@ -665,6 +730,8 @@ def _get_old_interpretation(
     if sanity is not None:
         return sanity
 
+    old_opinions = parsed.get(OLD_OPINIONS_KEY) or parsed.get(NEW_OPINIONS_KEY, "")
+
     # 預設層
     main_text, mt_trunc = _apply_safety_valve(parsed.get("解釋文", ""))
     result = {
@@ -678,7 +745,7 @@ def _get_old_interpretation(
         "main_text_truncated": mt_trunc,
         "related_statutes": parsed.get("相關法令", ""),
         "has_reasoning": _is_substantive(parsed.get("理由書", "")),
-        "has_opinions": _is_substantive(parsed.get(OLD_OPINIONS_KEY, "")),
+        "has_opinions": _is_substantive(old_opinions),
         "source_url": final_url,
     }
 
@@ -686,9 +753,7 @@ def _get_old_interpretation(
     _attach_long_field(
         result, parsed.get("理由書", ""), "reasoning", include_reasoning, reasoning_keyword
     )
-    _attach_long_field(
-        result, parsed.get(OLD_OPINIONS_KEY, ""), "opinions", include_opinions, opinions_keyword
-    )
+    _attach_html_opinions(result, old_opinions, include_opinions, opinions_keyword, opinion_document)
 
     return result
 
@@ -700,6 +765,7 @@ def _get_new_ruling(
     reasoning_keyword: str,
     include_opinions: bool,
     opinions_keyword: str,
+    opinion_document: str = "",
 ) -> dict:
     if number <= 0 or year <= 0:
         return error_response(
@@ -739,7 +805,7 @@ def _get_new_ruling(
                 "source_url": cached.get("source_url") or f"{BASE}/judcurrentNew1.aspx?fid=38",
             }
             _attach_long_field(result, cached.get("reasoning", ""), "reasoning", include_reasoning, kw_r)
-            _attach_long_field(result, cached.get("opinions", ""), "opinions", include_opinions, kw_o)
+            _attach_opinions(result, cached, "new/" + cache_key, include_opinions, kw_o, opinion_document)
             return result
 
     try:
@@ -796,8 +862,8 @@ def _get_new_ruling(
     _attach_long_field(
         result, parsed.get("理由", ""), "reasoning", include_reasoning, reasoning_keyword
     )
-    _attach_long_field(
-        result, parsed.get(NEW_OPINIONS_KEY, ""), "opinions", include_opinions, opinions_keyword
+    _attach_html_opinions(
+        result, parsed.get(NEW_OPINIONS_KEY, ""), include_opinions, opinions_keyword, opinion_document
     )
 
     return result

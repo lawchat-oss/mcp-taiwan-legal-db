@@ -19,7 +19,7 @@
 | 功能 | 說明 |
 |------|------|
 | **8 個 MCP 工具** | 裁判書搜尋/全文、法規查詢、釋字/憲判字查詢、引用關係圖譜 |
-| **離線快取** | 868 筆大法官解釋與憲判字（含理由書/意見書全文）從本地 JSON 即時回傳 |
+| **離線快取** | 868 筆大法官解釋與憲判字（含理由書全文，以及從官網 PDF 擷取的大法官意見書全文）從本地資料即時回傳 |
 | **引用關係圖譜** | 從理由書抽取所有引用的釋字/憲判字，追溯憲法學說演變 |
 | **全文搜尋** | 裁判書關鍵字搜尋 + 釋字爭點/理由書全文搜尋 |
 | **混合請求策略** | 預設用 httpx 直打（~0.25s），觸發司法院 F5 WAF 時自動以 Playwright 刷 cookie 後繼續 |
@@ -202,6 +202,7 @@ query_regulation(law_name="勞動基準法", article_no="23", include_history=Tr
 | 理由書全文（最多 15,000 字） | `include_reasoning=True` | ✓ |
 | 意見書片段 | `opinions_keyword="關鍵字"` | ✓ |
 | 意見書全文 | `include_opinions=True` | ✓ |
+| 單份意見書全文 | `opinion_document="許宗力"` | ✓ |
 
 ```python
 # 預設層（離線，~0ms）
@@ -211,7 +212,10 @@ get_interpretation("釋字748")
 get_interpretation("釋字748", reasoning_keyword="婚姻自由")
 
 # 在意見書中定位特定大法官
-get_interpretation("釋字499", opinions_keyword="林子儀")
+get_interpretation("釋字758", opinions_keyword="湯德宗")
+
+# 只讀某位大法官的完整意見書（意見書合計過長被截斷時）
+get_interpretation("釋字758", opinion_document="許宗力")
 
 # 新制憲判字
 get_interpretation("111年憲判字第1號")
@@ -405,14 +409,17 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 
 **裁判書年份涵蓋範圍**：本工具即時代理司法院系統，沒有自己的資料庫，有效年份 = 司法院收錄範圍。實測（以「竊盜」為關鍵字計數）民國 89 年（2000）起每年數萬筆，81–88 年（1992–1999）合計約 2,000 筆，80 年（1991）以前為零。司法院公告其開放資料檔「收錄範圍與裁判書查詢系統相同」，因此沒有更早的公開來源。查詢 2000 年以前的裁判請預期查無或零星。
 
-憲法法庭資料（釋字／憲判字）**不在查詢時連網取得** — 它是離線打包的（`old_cases.json`／`new_cases.json`），來源為 `cons.judicial.gov.tw`，由維護腳本離線重建。詳見 [SOURCES.md](SOURCES.md)。
+憲法法庭資料（釋字／憲判字）**不在查詢時連網取得** — 它是離線打包的（`old_cases.json`／`new_cases.json`／`opinions.zip`），來源為 `cons.judicial.gov.tw`，由維護腳本離線重建。詳見 [SOURCES.md](SOURCES.md)。
 
 ### 憲法法庭資料統計
 
 | 資料集 | 筆數 | 含理由書 | 含意見書 | 檔案大小 |
 |--------|------|---------|---------|---------|
-| 舊制釋字（old_cases.json） | 813 | 734 | 370 | 7.4 MB |
-| 新制憲判字（new_cases.json） | 55 | 55 | 55 | 1.8 MB |
+| 舊制釋字（old_cases.json） | 813 | 734 | 472 | 7.4 MB |
+| 新制憲判字（new_cases.json） | 55 | 55 | 54 | 1.8 MB |
+| 大法官意見書全文（opinions.zip） | 1,536 份 | — | 1,515 份擷取出文字 | 10.6 MB |
+
+釋字 401 號以後與憲判字的大法官意見書，官網只以 PDF 附件公開，已擷取文字打包進 `opinions.zip`，查詢回傳的 `opinion_documents` 會列出每份意見書的標題、官網 PDF 連結與字數。其中 21 份 PDF 的字型無法解碼（主要是釋字 735–753 號的部分意見書），只保留官網連結。重建方式見 `scripts/build_opinions.py`。
 
 ## 快取
 
@@ -422,7 +429,7 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 | 搜尋結果 | 24 小時 | 同上 |
 | 法規條文 | 7 天 | 同上 |
 | pcode metadata | 30 天 | 同上 |
-| 釋字/憲判字 | 本地 JSON（不過期） | `mcp_server/data/old_cases.json`、`new_cases.json` |
+| 釋字/憲判字 | 本地資料（不過期） | `mcp_server/data/old_cases.json`、`new_cases.json`、`opinions.zip` |
 
 全部清除：刪掉 `mcp_server/data/cache/legal_mcp.db`。快取檔在 `.gitignore` 內。
 
@@ -460,7 +467,8 @@ mcp-taiwan-legal-db/
     │   ├── pcode_all.json          # 11,700+ 部法規（內建，~780 KB）
     │   ├── law_histories.json      # 修法沿革（內建，~9.6 MB）
     │   ├── old_cases.json          # 813 筆舊制釋字全文（內建，~7.4 MB）
-    │   └── new_cases.json          # 55 筆新制憲判字全文（內建，~1.8 MB）
+    │   ├── new_cases.json          # 55 筆新制憲判字全文（內建，~1.8 MB）
+    │   └── opinions.zip            # 大法官意見書全文，由官網 PDF 擷取（內建，~10.6 MB）
     ├── models/            # Judgment / Regulation dataclass
     ├── parsers/           # 判決與法規頁面的 HTML parser
     ├── tools/

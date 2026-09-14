@@ -21,6 +21,7 @@ All data in this project is sourced from Taiwan government public databases.
 - **Coverage**:
   - 舊制大法官解釋（釋字）第 1–813 號（民國 38–110 年，1949–2021）
   - 新制憲法法庭裁判（憲判字）民國 111 年起（2022–）
+  - 大法官意見書：釋字 401 號以後與憲判字的意見書取自官網公開的 PDF 附件，擷取文字後打包（`scripts/build_opinions.py`）
 
 ## Copyright Status
 
