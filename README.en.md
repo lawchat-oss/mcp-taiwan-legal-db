@@ -8,7 +8,7 @@ A Model Context Protocol (MCP) server that gives any MCP-compatible AI assistant
 - **National regulation database** — law.moj.gov.tw (11,700+ laws and ordinances)
 - **Constitutional Court** — 868 Grand Justices interpretations (釋字) and Constitutional Court judgments (憲判字), with full reasoning text, served offline from a bundled cache
 
-Written in Python with [FastMCP](https://github.com/modelcontextprotocol/python-sdk). Pure tool wrapper — it makes no network calls outside the official Taiwan government sources listed under [Data sources](#data-sources).
+Written in Python with the [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk). Pure tool wrapper — it makes no network calls outside the official Taiwan government sources listed under [Data sources](#data-sources).
 
 ---
 
@@ -477,7 +477,7 @@ mcp-taiwan-legal-db/
 ├── pyproject.toml         # Package metadata and deps
 └── mcp_server/
     ├── __init__.py
-    ├── server.py          # FastMCP entry — defines the 8 @mcp.tool() functions
+    ├── server.py          # MCPServer entry — defines the 8 @mcp.tool() functions
     ├── config.py          # URLs, court codes, cache TTLs, allowed domains
     ├── updater.py         # Standalone pcode_all.json refresh script
     ├── cache/db.py        # SQLite cache layer

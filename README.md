@@ -10,7 +10,7 @@
 - **全國法規資料庫** — law.moj.gov.tw（11,700+ 部法規）
 - **憲法法庭** — cons.judicial.gov.tw（868 筆大法官解釋 + 憲判字，含理由書全文，離線快取）
 
-以 Python 搭配 [FastMCP](https://github.com/modelcontextprotocol/python-sdk) 寫成。純工具 wrapper，只連線台灣政府官方來源（詳見下方「資料來源與統計」），不發送任何其他網路請求；憲法法庭資料為內建離線打包。
+以 Python 搭配 [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) 寫成。純工具 wrapper，只連線台灣政府官方來源（詳見下方「資料來源與統計」），不發送任何其他網路請求；憲法法庭資料為內建離線打包。
 
 ---
 
@@ -445,7 +445,7 @@ mcp-taiwan-legal-db/
 ├── pyproject.toml         # 套件 metadata 與相依
 └── mcp_server/
     ├── __init__.py
-    ├── server.py          # FastMCP 入口 — 定義 8 個 @mcp.tool() function
+    ├── server.py          # MCPServer 入口 — 定義 8 個 @mcp.tool() function
     ├── config.py          # URL、法院代碼、快取 TTL、allowed domains
     ├── updater.py         # 獨立的 pcode_all.json 更新 script
     ├── cache/db.py        # SQLite 快取層
