@@ -17,10 +17,9 @@ import os
 import tempfile
 import time
 import zipfile
-from datetime import datetime, time as dt_time, timedelta
+from datetime import datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
-from zoneinfo import ZoneInfo
 
 from mcp_server.ssl_setup import inject_os_trust_store
 
@@ -39,8 +38,10 @@ ORDER_API_URL = "https://law.moj.gov.tw/api/Ch/Order/JSON"
 # 下載 timeout（官方 API 回傳 ~30MB ZIP，可能較慢）
 DOWNLOAD_TIMEOUT = 180.0
 
-# 台灣時區（政府法規更新以台灣時間為準）
-TW_TZ = ZoneInfo("Asia/Taipei")
+# 台灣時區（政府法規更新以台灣時間為準）。台灣自 1979 年起無日光節約時間，固定 UTC+8 即正確；
+# 不用 ZoneInfo("Asia/Taipei")：Windows 沒有系統時區資料庫，會在 import 時就拋錯，
+# 導致 pcode_all.json 自動更新在 Windows 上永遠失敗。
+TW_TZ = timezone(timedelta(hours=8), "Asia/Taipei")
 
 # 資料驗證下限（目前 11,749，設 10K 防止空資料覆蓋）
 MIN_EXPECTED_COUNT = 10_000
