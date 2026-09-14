@@ -40,6 +40,13 @@ pip install mcp-taiwan-legal-db
 > - `pipx install mcp-taiwan-legal-db` (recommended — isolated venv, standard for Python CLI tools)
 > - or `pip install --user --break-system-packages mcp-taiwan-legal-db`
 
+> **Windows / enterprise deployment**: install it as an isolated tool with [uv](https://docs.astral.sh/uv/) or pipx so it never touches the system Python's site-packages:
+> ```powershell
+> uv tool install mcp-taiwan-legal-db
+> uv tool update-shell   # adds the tool directory to PATH; restart the terminal afterwards
+> ```
+> Install it **per user** (the default location is in the user profile). At runtime the server writes its query cache and statute-code table updates next to the package, so a shared all-users location that regular users cannot write to (such as `C:\Program Files`) fails at startup. All-users shared installs are not supported yet.
+
 After install, the `mcp-taiwan-legal-db` entry point is on your PATH. **Wire it into Claude Code** (available from any project):
 
 ```bash
@@ -48,10 +55,10 @@ claude mcp add taiwan-legal-db mcp-taiwan-legal-db --scope user
 
 Then `/mcp` to reload, and Claude will pick up the 8 MCP tools on natural-language queries.
 
-**Optional — F5 WAF fallback**:
+**Chromium (Judicial Yuan WAF fallback)**: since v1.1.0 it is downloaded automatically the first time it is needed. On machines that cannot download at runtime, pre-install it:
 
 ```bash
-playwright install chromium    # only invoked when the Judicial Yuan WAF triggers; idle otherwise
+uvx --from mcp-taiwan-legal-db playwright install chromium    # only used when the Judicial Yuan WAF triggers; idle otherwise
 ```
 
 ---

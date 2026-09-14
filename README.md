@@ -36,6 +36,13 @@ pip install mcp-taiwan-legal-db
 > - `pipx install mcp-taiwan-legal-db`（推薦，自動建隔離 venv，CLI tool 標準裝法）
 > - 或 `pip install --user --break-system-packages mcp-taiwan-legal-db`
 
+> **Windows / 企業部署**：建議用 [uv](https://docs.astral.sh/uv/) 或 pipx 裝成獨立工具，不碰系統 Python 的 site-packages：
+> ```powershell
+> uv tool install mcp-taiwan-legal-db
+> uv tool update-shell   # 把工具目錄加進 PATH，重開終端機後生效
+> ```
+> 請**每位使用者各自安裝**（預設裝在使用者目錄）。伺服器執行時會把查詢快取與法規代碼表更新寫在套件目錄旁，裝到 `C:\Program Files` 這類一般使用者無法寫入的共用位置會啟動失敗，目前不支援全使用者共用安裝。
+
 裝完後 entry point `mcp-taiwan-legal-db` 會在 PATH 上。**接到 Claude Code**（任何專案都能用）：
 
 ```bash
@@ -44,10 +51,10 @@ claude mcp add taiwan-legal-db mcp-taiwan-legal-db --scope user
 
 接著 `/mcp` 重啟連線、Claude 就會在自然語言查詢時自動用 8 個 MCP tool。
 
-**選擇性 — F5 WAF fallback**：
+**Chromium（司法院 WAF fallback）**：v1.1.0 起會在第一次需要時自動下載安裝，不用手動處理。無法連外下載的環境請預先安裝：
 
 ```bash
-playwright install chromium    # 僅在司法院 WAF 觸發時用，平時 idle
+uvx --from mcp-taiwan-legal-db playwright install chromium    # 僅在司法院 WAF 觸發時使用，平時 idle
 ```
 
 ---
