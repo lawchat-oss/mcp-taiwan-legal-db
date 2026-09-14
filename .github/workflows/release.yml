@@ -1,0 +1,32 @@
+name: Release
+
+# Push a tag like v1.1.0 to publish that version to PyPI.
+# Uses PyPI Trusted Publishing (OIDC): no API token or secret is stored anywhere.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Tag must match pyproject version
+        run: |
+          version="$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)"
+          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match pyproject version $version"
+            exit 1
+          fi
+
+      - name: Build
+        run: uv build
+
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
