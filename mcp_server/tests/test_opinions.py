@@ -163,6 +163,9 @@ def test_parse_opinion_title_structures_authors_joined_type():
     assert build.parse_opinion_title("795蔡宗珍大法官提出之不同意見書(吳陳鐶大法官加入)") == {
         "authors": ["蔡宗珍"], "joined": ["吳陳鐶"], "type": "不同"}
     assert build.parse_opinion_title("憲法法庭112年憲判字第1號判決黃大法官昭元提出，許大法官志雄加入、謝大法官銘洋加入（第3至16段）")["joined"] == ["許志雄", "謝銘洋"]
+    assert build.parse_opinion_title("林大法官子儀及許大法官宗力共同提出之協同意見書")["authors"] == ["林子儀", "許宗力"]
+    assert build.parse_opinion_title("楊大法官仁壽與王大法官和雄共同提出之部分不同意見書")["authors"] == ["楊仁壽", "王和雄"]
+    assert build.parse_opinion_title("憲法法庭114年憲判字第1號判決尤大法官伯祥提出協同意見書，謝大法官銘洋、陳大法官忠五均加入")["joined"] == ["謝銘洋", "陳忠五"]
 
 
 def test_opinion_documents_carry_structured_fields():
