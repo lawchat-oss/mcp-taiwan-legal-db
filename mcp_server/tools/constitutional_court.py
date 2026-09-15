@@ -332,10 +332,10 @@ def _extract_snippets(
     return snippets, total
 
 
-def _apply_safety_valve(text: str) -> tuple[str, bool]:
+def _apply_safety_valve(text: str, next_step: Optional[str] = None) -> tuple[str, bool]:
     """長文硬安全閥。僅在極端大案觸發（預設 15000 字）。
 
-    觸發時在尾端注入明確的 system warning，要求 LLM 不得斷言「未提及」。
+    觸發時在尾端注入明確的 system warning，要求 LLM 不得斷言「未提及」；next_step 告訴 LLM 如何取得後段。
     """
     if not text or len(text) <= HARD_SAFETY_VALVE:
         return text, False
@@ -345,7 +345,7 @@ def _apply_safety_valve(text: str) -> tuple[str, bool]:
         f"\n\n[System Warning: 本欄位字數過長（原長 {original} 字），"
         f"已截斷末端 {cut} 字。請優先基於已提供的部分進行推理，"
         f"切勿直接斷言「大法官並未提及某事」——被截斷的內容可能包含關鍵論述。"
-        f"若判斷末端內容關鍵，可回報使用者需人工查閱完整判決。]"
+        f"{next_step or '若判斷末端內容關鍵，可回報使用者需人工查閱完整判決。'}]"
     )
     return text[:HARD_SAFETY_VALVE] + warning, True
 
@@ -416,7 +416,9 @@ def _bundled_opinions(member: str) -> Optional[dict]:
             return None
 
 
-def _attach_html_opinions(result: dict, text: str, include_full: bool, keyword: str, document: str) -> None:
+def _attach_html_opinions(
+    result: dict, text: str, include_full: bool, keyword: str, document: str, offset: int = 0
+) -> None:
     """沒有 PDF 擷取資料時的意見書（早期釋字的網頁內文，或打包後才公布、走 live 查詢的新案）。
 
     整段文字無法可靠切成單份；指定 document 時，姓名有出現在內文才回傳，否則明確回報找不到。
@@ -426,11 +428,11 @@ def _attach_html_opinions(result: dict, text: str, include_full: bool, keyword: 
         result["opinions_unavailable"] = True
         result["opinions_hint"] = f"該案意見書中找不到「{document}」。"
         return
-    _attach_long_field(result, text, "opinions", include_full or bool(document), keyword)
+    _attach_long_field(result, text, "opinions", include_full or bool(document), keyword, offset)
 
 
 def _attach_opinions(
-    result: dict, cached: dict, member: str, include_full: bool, keyword: str, document: str = ""
+    result: dict, cached: dict, member: str, include_full: bool, keyword: str, document: str = "", offset: int = 0
 ) -> None:
     """快取路徑的意見書：PDF 擷取全文優先，其次 case JSON 內的 HTML 意見書；並附上附件清單。
 
@@ -443,7 +445,7 @@ def _attach_opinions(
         result["opinion_documents"] = cached["opinion_documents"]
     bundled = _bundled_opinions(member)
     if not bundled:
-        _attach_html_opinions(result, cached.get("opinions", ""), include_full, keyword, document)
+        _attach_html_opinions(result, cached.get("opinions", ""), include_full, keyword, document, offset)
         return
     docs = bundled["documents"]
     if document:
@@ -458,7 +460,7 @@ def _attach_opinions(
         + f"\n{d['text']}"
         for d in docs if d["text"]
     )
-    _attach_long_field(result, text, "opinions", include_full or bool(document), keyword)
+    _attach_long_field(result, text, "opinions", include_full or bool(document), keyword, offset)
 
 
 def _extract_citations(text: str) -> list[dict]:
@@ -523,6 +525,7 @@ def _attach_long_field(
     field_name: str,
     include_full: bool,
     keyword: str,
+    offset: int = 0,
 ) -> None:
     """把長文欄位以「keyword 片段 / 全文 / 不附加」三種模式其中一種附加到 result。
 
@@ -564,10 +567,17 @@ def _attach_long_field(
             )
         return
 
-    # include_full 模式
-    text, trunc = _apply_safety_valve(raw_text or "")
+    # include_full 模式；意見書可用 offset（opinions_offset）分段讀完超過安全閥的長文
+    offset = max(0, offset)
+    next_offset = offset + HARD_SAFETY_VALVE
+    next_step = f"請以 opinions_offset={next_offset} 再查一次續讀後段。" if field_name == "opinions" else None
+    text, trunc = _apply_safety_valve((raw_text or "")[offset:], next_step)
     result[field_name] = text
     result[f"{field_name}_truncated"] = trunc
+    if offset or trunc:
+        result[f"{field_name}_full_length"] = raw_len
+    if trunc and next_step:
+        result[f"{field_name}_next_offset"] = next_offset
 
 
 # ─────────────────────────────────────────────────────────────
@@ -582,6 +592,7 @@ def get_interpretation(
     include_opinions: bool = False,
     opinions_keyword: str = "",
     opinion_document: str = "",
+    opinions_offset: int = 0,
 ) -> dict:
     """取得司法院大法官解釋 / 憲法法庭裁判全文（分層回傳，支援關鍵字片段模式）。
 
@@ -627,6 +638,7 @@ def get_interpretation(
 
     🎯 opinion_document（預設 ""）：只取標題含此字串的意見書全文，例如 `opinion_document="許宗力"`
     - 何時用：意見書合計超過安全閥、要讀其中一位大法官的完整意見時
+    - 單份仍超過 15000 字時回傳 `opinions_next_offset`，以相同參數加 `opinions_offset=該值` 續讀後段
 
     ⚠️ 平行呼叫限制：若同一 turn 需查多個解釋，一律先用預設值抓全部，評估後再對
     「最關鍵的一個」發第二次呼叫。**絕對不要對多個解釋同時開啟全文模式**。若真要
@@ -643,6 +655,7 @@ def get_interpretation(
         include_opinions: 是否回傳「意見書」全文
         opinions_keyword: 若非空，在意見書中搜尋該關鍵字並回片段（覆蓋 include_opinions）
         opinion_document: 若非空，只取標題含此字串的意見書（例如大法官姓名）
+        opinions_offset: 意見書全文從第幾字開始回傳（續讀被截斷的長文，值取自 opinions_next_offset）
 
     Returns:
         成功：success=True 與預設層欄位，加上：
@@ -659,11 +672,11 @@ def get_interpretation(
     if system == "釋字":
         return _get_old_interpretation(
             number, include_reasoning, reasoning_keyword, include_opinions, opinions_keyword,
-            opinion_document,
+            opinion_document, opinions_offset,
         )
     return _get_new_ruling(
         year, number, include_reasoning, reasoning_keyword, include_opinions, opinions_keyword,
-        opinion_document,
+        opinion_document, opinions_offset,
     )
 
 
@@ -674,6 +687,7 @@ def _get_old_interpretation(
     include_opinions: bool,
     opinions_keyword: str,
     opinion_document: str = "",
+    opinions_offset: int = 0,
 ) -> dict:
     if number <= 0:
         return error_response(f"號次必須為正整數（收到 {number}）")
@@ -708,7 +722,7 @@ def _get_old_interpretation(
                 "source_url": cached.get("source_url") or f"{BASE}/jcc/zh-tw/jep03/show?expno={number}",
             }
             _attach_long_field(result, cached.get("reasoning", ""), "reasoning", include_reasoning, kw_r)
-            _attach_opinions(result, cached, "old/" + str(number), include_opinions, kw_o, opinion_document)
+            _attach_opinions(result, cached, "old/" + str(number), include_opinions, kw_o, opinion_document, opinions_offset)
             return result
 
     try:
@@ -758,7 +772,7 @@ def _get_old_interpretation(
     _attach_long_field(
         result, parsed.get("理由書", ""), "reasoning", include_reasoning, reasoning_keyword
     )
-    _attach_html_opinions(result, old_opinions, include_opinions, opinions_keyword, opinion_document)
+    _attach_html_opinions(result, old_opinions, include_opinions, opinions_keyword, opinion_document, opinions_offset)
 
     return result
 
@@ -771,6 +785,7 @@ def _get_new_ruling(
     include_opinions: bool,
     opinions_keyword: str,
     opinion_document: str = "",
+    opinions_offset: int = 0,
 ) -> dict:
     if number <= 0 or year <= 0:
         return error_response(
@@ -810,7 +825,7 @@ def _get_new_ruling(
                 "source_url": cached.get("source_url") or f"{BASE}/judcurrentNew1.aspx?fid=38",
             }
             _attach_long_field(result, cached.get("reasoning", ""), "reasoning", include_reasoning, kw_r)
-            _attach_opinions(result, cached, "new/" + cache_key, include_opinions, kw_o, opinion_document)
+            _attach_opinions(result, cached, "new/" + cache_key, include_opinions, kw_o, opinion_document, opinions_offset)
             return result
 
     try:
@@ -868,7 +883,7 @@ def _get_new_ruling(
         result, parsed.get("理由", ""), "reasoning", include_reasoning, reasoning_keyword
     )
     _attach_html_opinions(
-        result, parsed.get(NEW_OPINIONS_KEY, ""), include_opinions, opinions_keyword, opinion_document
+        result, parsed.get(NEW_OPINIONS_KEY, ""), include_opinions, opinions_keyword, opinion_document, opinions_offset
     )
 
     return result

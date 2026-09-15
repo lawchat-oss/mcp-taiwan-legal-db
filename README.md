@@ -203,6 +203,7 @@ query_regulation(law_name="勞動基準法", article_no="23", include_history=Tr
 | 意見書片段 | `opinions_keyword="關鍵字"` | ✓ |
 | 意見書全文 | `include_opinions=True` | ✓ |
 | 單份意見書全文 | `opinion_document="許宗力"` | ✓ |
+| 超過 15,000 字的意見書續讀後段 | `opinions_offset=15000`（值取自回傳的 `opinions_next_offset`） | ✓ |
 
 ```python
 # 預設層（離線，~0ms）
@@ -216,6 +217,9 @@ get_interpretation("釋字758", opinions_keyword="湯德宗")
 
 # 只讀某位大法官的完整意見書（意見書合計過長被截斷時）
 get_interpretation("釋字758", opinion_document="許宗力")
+
+# 單份意見書超過 15,000 字被截斷時，用回傳的 opinions_next_offset 續讀
+get_interpretation("釋字777", opinion_document="吳陳鐶", opinions_offset=15000)
 
 # 新制憲判字
 get_interpretation("111年憲判字第1號")

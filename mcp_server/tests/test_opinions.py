@@ -32,6 +32,19 @@ def test_opinion_document_returns_one_full_opinion():
     assert "湯德宗" not in r["opinions"]
 
 
+def test_long_single_opinion_can_be_read_in_pages():
+    """單份超過安全閥（釋字 777 號吳陳鐶意見書約 2 萬字）時，用 opinions_offset 續讀，接起來即完整全文。"""
+    first = cc.get_interpretation("釋字第777號", opinion_document="吳陳鐶")
+    assert first["opinions_truncated"] and first["opinions_next_offset"] == cc.HARD_SAFETY_VALVE
+    assert "opinions_offset=15000" in first["opinions"]
+    rest = cc.get_interpretation("釋字第777號", opinion_document="吳陳鐶", opinions_offset=first["opinions_next_offset"])
+    assert not rest["opinions_truncated"] and "opinions_next_offset" not in rest
+    head = first["opinions"][: cc.HARD_SAFETY_VALVE]
+    assert len(head + rest["opinions"]) == first["opinions_full_length"] == rest["opinions_full_length"]
+    wu = next(d for d in cc._bundled_opinions("old/777")["documents"] if "吳大法官陳鐶" in d["title"])
+    assert head + rest["opinions"] == f"【{wu['title']}】\n{wu['text']}"
+
+
 def test_opinion_document_not_found_gives_hint():
     r = cc.get_interpretation("釋字第758號", opinion_document="不存在的大法官")
     assert r["opinions_unavailable"] and "opinion_documents" in r["opinions_hint"]
@@ -150,6 +163,9 @@ def test_parse_opinion_title_structures_authors_joined_type():
     assert build.parse_opinion_title("795蔡宗珍大法官提出之不同意見書(吳陳鐶大法官加入)") == {
         "authors": ["蔡宗珍"], "joined": ["吳陳鐶"], "type": "不同"}
     assert build.parse_opinion_title("憲法法庭112年憲判字第1號判決黃大法官昭元提出，許大法官志雄加入、謝大法官銘洋加入（第3至16段）")["joined"] == ["許志雄", "謝銘洋"]
+    assert build.parse_opinion_title("林大法官子儀及許大法官宗力共同提出之協同意見書")["authors"] == ["林子儀", "許宗力"]
+    assert build.parse_opinion_title("楊大法官仁壽與王大法官和雄共同提出之部分不同意見書")["authors"] == ["楊仁壽", "王和雄"]
+    assert build.parse_opinion_title("憲法法庭114年憲判字第1號判決尤大法官伯祥提出協同意見書，謝大法官銘洋、陳大法官忠五均加入")["joined"] == ["謝銘洋", "陳忠五"]
 
 
 def test_opinion_documents_carry_structured_fields():

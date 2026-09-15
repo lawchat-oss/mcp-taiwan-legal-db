@@ -235,6 +235,7 @@ Retrieves the full text of a Grand Justices interpretation (釋字 No. 1–813) 
 | Opinion excerpt by keyword | `opinions_keyword="..."` | ✓ |
 | Full opinions | `include_opinions=True` | ✓ |
 | One opinion in full | `opinion_document="許宗力"` | ✓ |
+| Rest of an opinion longer than 15,000 chars | `opinions_offset=15000` (from the returned `opinions_next_offset`) | ✓ |
 
 ```python
 # Default tier (offline, ~0ms)
@@ -248,6 +249,9 @@ get_interpretation("釋字758", opinions_keyword="湯德宗")
 
 # Read one Justice's opinion in full (when all opinions together exceed the size cap)
 get_interpretation("釋字758", opinion_document="許宗力")
+
+# An opinion over 15,000 chars is truncated; continue from the returned opinions_next_offset
+get_interpretation("釋字777", opinion_document="吳陳鐶", opinions_offset=15000)
 
 # Constitutional Court judgment under the new regime
 get_interpretation("111年憲判字第1號")
