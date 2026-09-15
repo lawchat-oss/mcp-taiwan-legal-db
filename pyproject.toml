@@ -1,6 +1,6 @@
 [project]
 name = "mcp-taiwan-legal-db"
-version = "1.1.1"
+version = "1.1.2"
 description = "MCP server for querying Taiwan (ROC) judicial judgments and the national regulation database"
 readme = "README.md"
 license = { text = "MIT" }
@@ -57,7 +57,7 @@ build-backend = "setuptools.build_meta"
 include = ["mcp_server*"]
 
 [tool.setuptools.package-data]
-mcp_server = ["data/*.json"]
+mcp_server = ["data/*.json", "data/*.zip"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

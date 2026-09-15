@@ -34,3 +34,6 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+# scripts/build_opinions.py download cache
+.cache/
