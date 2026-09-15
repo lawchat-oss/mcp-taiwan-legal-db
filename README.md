@@ -417,9 +417,9 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 |--------|------|---------|---------|---------|
 | 舊制釋字（old_cases.json） | 813 | 734 | 472 | 7.4 MB |
 | 新制憲判字（new_cases.json） | 55 | 55 | 54 | 1.8 MB |
-| 大法官意見書全文（opinions.zip） | 1,536 份 | — | 1,535 份有全文 | 10.7 MB |
+| 大法官意見書全文（opinions.zip） | 1,536 份 | — | 1,536 份有全文 | 10.8 MB |
 
-釋字 401 號以後與憲判字的大法官意見書，官網只以 PDF 附件公開，已擷取文字打包進 `opinions.zip`，查詢回傳的 `opinion_documents` 會列出每份意見書的標題、官網 PDF 連結與字數。其中 21 份 PDF 的字型無法解碼或頁面為圖片（主要是釋字 735–753 號的部分意見書），20 份改以頁面影像逐字轉錄（回傳時標註 `transcribed`，引用前請核對官網 PDF），釋字第 777 號吳陳鐶大法官部分不同意見書目前只保留官網連結。意見書以憲法法庭網站公布的 PDF 為準；全國法規資料庫收錄的早期意見書是事後編修的版本（用字統一、修正筆誤、當事人姓名去識別化），兩者文字可能略有出入。重建方式見 `scripts/build_opinions.py`。
+釋字 401 號以後與憲判字的大法官意見書，官網只以 PDF 附件公開，已擷取文字打包進 `opinions.zip`，查詢回傳的 `opinion_documents` 會列出每份意見書的標題、官網 PDF 連結與字數。其中 22 份 PDF 的字型無法解碼或頁面為圖片（主要是釋字 735–753 號的部分意見書），改以頁面影像逐字轉錄（回傳時標註 `transcribed`，引用前請核對官網 PDF）。意見書以憲法法庭網站公布的 PDF 為準；全國法規資料庫收錄的早期意見書是事後編修的版本（用字統一、修正筆誤、當事人姓名去識別化），兩者文字可能略有出入。重建方式見 `scripts/build_opinions.py`。
 
 ## 快取
 
@@ -468,7 +468,7 @@ mcp-taiwan-legal-db/
     │   ├── law_histories.json      # 修法沿革（內建，~9.6 MB）
     │   ├── old_cases.json          # 813 筆舊制釋字全文（內建，~7.4 MB）
     │   ├── new_cases.json          # 55 筆新制憲判字全文（內建，~1.8 MB）
-    │   └── opinions.zip            # 大法官意見書全文，由官網 PDF 擷取（內建，~10.7 MB）
+    │   └── opinions.zip            # 大法官意見書全文，由官網 PDF 擷取（內建，~10.8 MB）
     ├── models/            # Judgment / Regulation dataclass
     ├── parsers/           # 判決與法規頁面的 HTML parser
     ├── tools/

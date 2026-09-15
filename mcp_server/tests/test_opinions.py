@@ -79,6 +79,20 @@ def test_undecodable_pdf_uses_labelled_transcription():
     assert "林俊益" in r["opinions"]
 
 
+def test_garbled_gate_ignores_foreign_footnotes_but_catches_garbled_body():
+    build = _build_script()
+    assert not build.is_garbled("多數意見以「肇事」一詞違反明確性。註3：当該車両等の交通による人の死傷があつた場合 A driver of any vehicle involved in an accident")
+    assert build.is_garbled("ਜғȐΠᆀβԦӦΠНǵЍбࡽምΓ҇πբϷౢ之ᜅӕǶҁဦࡼݤᏢǴЪѝ൩βԦ҂ԋჹϦ。1黃啟禎，干涉行政法上責任人之探討，2002年，頁296。")
+
+
+def test_footnote_heavy_opinion_is_extracted_and_garbled_body_is_transcribed():
+    """釋字 777 號吳陳鐶意見書註腳多為外文，仍是可抽取的正常文字；714 號陳新民意見書正文亂碼，改用轉錄稿。"""
+    wu = next(d for d in cc.get_interpretation("釋字第777號", include_opinions=True)["opinion_documents"] if "吳大法官陳鐶" in d["title"])
+    assert wu["chars"] > 15000 and not wu.get("transcribed")
+    chen = next(d for d in cc.get_interpretation("釋字第714號", include_opinions=True)["opinion_documents"] if "陳大法官新民" in d["title"])
+    assert chen["transcribed"]
+
+
 def test_constitutional_judgment_opinions_bundled():
     r = cc.get_interpretation("111年憲判字第1號", include_opinions=True)
     assert r["success"] and r["has_opinions"]

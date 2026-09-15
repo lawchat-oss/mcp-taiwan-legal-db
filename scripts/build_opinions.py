@@ -50,8 +50,15 @@ JUSTICE_SPLIT_NAME = re.compile(
 )
 JUSTICE_FULL_NAME = re.compile(r"([\u4e00-\u9fff]{2,3})大法官(?=提出|加入|、|，|）|\)|$)")
 OPINION_TYPE = re.compile(r"(部分不同部分協同|部分協同部分不同|部分協同|部分不同|一部不同|協同|不同)意見書")
-# 中文字比例低於此值視為字型無法解碼的亂碼
-MIN_CJK_RATIO = 0.3
+# 字型無法解碼時抽出的是古木基、僧伽羅、希臘等不相干文字。不用中文字比例判斷：註腳大量引日、英文法條的
+# 意見書（釋字 777 號吳陳鐶）會被誤判，正文亂碼但註腳可讀的（釋字 714 號陳新民、陳春生）又會漏判。
+EXPECTED_LETTERS = re.compile(r"[\x00-ſ぀-ヿ㐀-䶿一-鿿＀-￯]")
+MAX_GARBLED_RATIO = 0.1  # 正常文件（含 OCR 雜訊）最高約 0.015，亂碼文件最低約 0.3
+
+
+def is_garbled(text: str) -> bool:
+    odd = sum(1 for c in text if re.match("L|M|Cn", unicodedata.category(c)) and not EXPECTED_LETTERS.match(c))
+    return odd > MAX_GARBLED_RATIO * len(text)
 
 
 def clean_pdf_text(raw: str) -> str:
@@ -196,7 +203,7 @@ def main() -> None:
                         text = clean_pdf_text("\n".join(pg.extract_text() or "" for pg in PdfReader(io.BytesIO(p.read_bytes())).pages))
                     except Exception as e:  # 壞檔不中斷整批
                         print(f"extract failed: {cid} {a['title']}: {e}")
-                if text and len(re.findall(r"[\u4e00-\u9fff]", text)) < MIN_CJK_RATIO * len(text):
+                if text and is_garbled(text):
                     print(f"garbled, skipped: {cid} {a['title']}")
                     text = ""
                 doc = {"title": a["title"], "url": a["url"], "text": text}
