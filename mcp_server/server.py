@@ -411,6 +411,7 @@ def get_interpretation(
     include_opinions: bool = False,
     opinions_keyword: str = "",
     opinion_document: str = "",
+    opinions_offset: int = 0,
 ) -> dict:
     """取得司法院大法官解釋（釋字第 1-813 號）或憲法法庭裁判（憲判字）全文。
 
@@ -428,10 +429,12 @@ def get_interpretation(
         opinions_keyword: 在意見書中搜尋關鍵字並回片段
         opinion_document: 只取標題含此字串的意見書全文（例如大法官姓名「許宗力」）；
             意見書合計過長被截斷時用。回傳的 opinion_documents 列出每份的標題、官網 PDF 連結與字數
+        opinions_offset: 意見書全文從第幾字開始回傳；單份超過 15000 字被截斷時，
+            以相同參數加上回傳的 opinions_next_offset 續讀後段
     """
     return _cc_get_interpretation(
         case_id, include_reasoning, reasoning_keyword,
-        include_opinions, opinions_keyword, opinion_document,
+        include_opinions, opinions_keyword, opinion_document, opinions_offset,
     )
 
 

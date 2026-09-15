@@ -32,6 +32,19 @@ def test_opinion_document_returns_one_full_opinion():
     assert "湯德宗" not in r["opinions"]
 
 
+def test_long_single_opinion_can_be_read_in_pages():
+    """單份超過安全閥（釋字 777 號吳陳鐶意見書約 2 萬字）時，用 opinions_offset 續讀，接起來即完整全文。"""
+    first = cc.get_interpretation("釋字第777號", opinion_document="吳陳鐶")
+    assert first["opinions_truncated"] and first["opinions_next_offset"] == cc.HARD_SAFETY_VALVE
+    assert "opinions_offset=15000" in first["opinions"]
+    rest = cc.get_interpretation("釋字第777號", opinion_document="吳陳鐶", opinions_offset=first["opinions_next_offset"])
+    assert not rest["opinions_truncated"] and "opinions_next_offset" not in rest
+    head = first["opinions"][: cc.HARD_SAFETY_VALVE]
+    assert len(head + rest["opinions"]) == first["opinions_full_length"] == rest["opinions_full_length"]
+    wu = next(d for d in cc._bundled_opinions("old/777")["documents"] if "吳大法官陳鐶" in d["title"])
+    assert head + rest["opinions"] == f"【{wu['title']}】\n{wu['text']}"
+
+
 def test_opinion_document_not_found_gives_hint():
     r = cc.get_interpretation("釋字第758號", opinion_document="不存在的大法官")
     assert r["opinions_unavailable"] and "opinion_documents" in r["opinions_hint"]
