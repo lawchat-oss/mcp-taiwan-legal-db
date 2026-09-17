@@ -254,10 +254,14 @@ async def query_regulation(
         article_no: 條號（如「184」「247-1」「15-1」），查詢單一條文
         from_no: 起始條號（如「184」），查詢條號範圍時使用
         to_no: 截止條號（如「198」），查詢條號範圍時使用
-        include_history: 是否包含修法沿革（使用者詢問修法歷程、修正時間、歷次修正內容時設為 True）
+        include_history: 是否包含修法沿革（使用者詢問修法歷程、修正時間、歷次修正內容時設為 True）。
+            搭配 article_no 時，會額外回傳該條文「歷次條文全文」(article_history)，
+            可直接前後對比同一條在不同時間的條文細節。
 
     Returns:
-        包含法規條文的字典：law (pcode, name, status), articles, source_url, history（選填）
+        包含法規條文的字典：law (pcode, name, status), articles, source_url,
+        history（選填，整部法規的修法沿革文字）,
+        article_history（選填，僅在 include_history+article_no 時提供，為該條歷次條文全文）
     """
     from mcp_server.tools.regulations import get_law_history
 
@@ -290,6 +294,11 @@ async def query_regulation(
         history = get_law_history(pcode)
         if history:
             result["history"] = history
+        # 查詢單一條文時，額外附上該條歷次條文全文（跨版本前後對比）。
+        # 不論成功與否都回傳 article_history，讓呼叫端能區分「歷史抓取失敗」
+        # （available=False + reason）與「確實無歷史/無此條」。
+        if article_no:
+            result["article_history"] = await reg_client.get_article_history(pcode, article_no)
 
     return result
 

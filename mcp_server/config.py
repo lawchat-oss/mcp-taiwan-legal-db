@@ -48,6 +48,10 @@ REGULATION_API_BASE = "https://law.moj.gov.tw"
 REGULATION_SINGLE_URL = REGULATION_API_BASE + "/LawClass/LawSingle.aspx"
 REGULATION_ALL_URL = REGULATION_API_BASE + "/LawClass/LawAll.aspx"
 REGULATION_HISTORY_URL = REGULATION_API_BASE + "/LawClass/LawHistory.aspx"
+# 歷史法規版本清單（列出各次修正的 lnndate/lser）
+REGULATION_OLDVERLIST_URL = REGULATION_API_BASE + "/LawClass/LawOldVerList.aspx"
+# 歷史法規某一版本全文（需帶 lnndate + lser）
+REGULATION_OLDVER_URL = REGULATION_API_BASE + "/LawClass/LawOldVer.aspx"
 
 # 司法院
 JUDICIAL_SEARCH_URL = "https://judgment.judicial.gov.tw/FJUD/Default_AD.aspx"

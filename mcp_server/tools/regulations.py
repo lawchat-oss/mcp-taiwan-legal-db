@@ -1,14 +1,19 @@
 """全國法規資料庫查詢工具"""
 
+import asyncio
 import json
 import logging
+import re
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 from mcp_server.config import (
     REGULATION_API_BASE,
     REGULATION_SINGLE_URL,
     REGULATION_ALL_URL,
+    REGULATION_OLDVERLIST_URL,
+    REGULATION_OLDVER_URL,
     PCODE_MAP,
     validate_url_domain,
 )
@@ -99,6 +104,36 @@ def reload_pcode_all():
 def get_law_history(pcode: str) -> str | None:
     """查詢法規修法沿革（從 law_histories.json 記憶體查）"""
     return _LAW_HISTORIES.get(pcode)
+
+
+def _normalize_article_no(no: str) -> str:
+    """條號正規化，供比對用：「227之2」「227-2」「 227-2 」→「227-2」"""
+    return no.replace("之", "-").replace(" ", "").replace("　", "").strip()
+
+
+def _format_roc_date(lnndate: str) -> str:
+    """西元 YYYYMMDD → 民國日期字串（如 19990421 → 民國88年04月21日）"""
+    if not (lnndate and len(lnndate) == 8 and lnndate.isdigit()):
+        return lnndate
+    year = int(lnndate[:4]) - 1911
+    return f"民國{year}年{lnndate[4:6]}月{lnndate[6:8]}日"
+
+
+def _is_retryable_http_error(exc: Exception) -> bool:
+    """判斷例外是否值得重試。
+
+    只重試暫時性錯誤：連線/讀取/逾時（TransportError）、429、5xx。
+    4xx（如 403/404）為確定性錯誤，重試只會徒增延遲與外部請求量，不重試。
+    非 httpx 例外（如解析為空的 ValueError）視為可能暫時性，允許重試。
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        return code == 429 or 500 <= code < 600
+    if isinstance(exc, httpx.TransportError):
+        return True
+    if isinstance(exc, httpx.HTTPError):
+        return False
+    return True
 
 
 def _get_law_status(pcode: str) -> str:
@@ -367,3 +402,207 @@ class RegulationClient:
             "articles": filtered,
             "source_url": all_result.get("source_url", ""),
         }
+
+    async def _fetch_version_list(self, pcode: str) -> list[dict]:
+        """抓取某法規的歷史版本清單（LawOldVerList）。
+
+        Returns:
+            [{lnndate: '19990421', lser: '001', date: '民國88年04月21日'}, ...]
+            依公布時間由舊到新排序。
+        """
+        if not validate_url_domain(REGULATION_OLDVERLIST_URL):
+            return []
+        params = {"pcode": pcode}
+        last_exc: Exception | None = None
+        resp: httpx.Response | None = None
+        for attempt in range(3):
+            try:
+                resp = await self.client.get(REGULATION_OLDVERLIST_URL, params=params)
+                resp.raise_for_status()
+                last_exc = None
+                break
+            except httpx.HTTPError as e:
+                last_exc = e
+                resp = None  # 失敗 response 不可用於解析
+                if attempt < 2 and _is_retryable_http_error(e):
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    continue
+                break  # 不可重試或已用盡：交由下方 raise
+        if last_exc is not None or resp is None:
+            raise last_exc if last_exc is not None else httpx.HTTPError("版本清單抓取失敗")
+        # 每個版本以 lnndate/lser 連結呈現；同一版本可能出現多次（全文/編章節等連結）
+        pairs = re.findall(r"lnndate=(\d+)&(?:amp;)?lser=(\d+)", resp.text)
+        seen: set[tuple[str, str]] = set()
+        versions: list[dict] = []
+        for lnndate, lser in pairs:
+            key = (lnndate, lser)
+            if key in seen:
+                continue
+            seen.add(key)
+            versions.append({
+                "lnndate": lnndate,
+                "lser": lser,
+                "date": _format_roc_date(lnndate),
+            })
+        # lnndate 為西元 YYYYMMDD，字串排序即時間排序（舊→新）
+        versions.sort(key=lambda v: (v["lnndate"], v["lser"]))
+        return versions
+
+    async def _fetch_version_articles(self, pcode: str, lnndate: str, lser: str) -> list[dict]:
+        """抓取某法規某一歷史版本的全部條文（LawOldVer），帶快取與重試。
+
+        失敗時 raise（由呼叫端區分「抓取失敗」與「該版無此條」）。
+        """
+        cache_key = f"__ver__{lnndate}_{lser}"
+        cached = await self.cache.get_regulation(pcode, cache_key)
+        if cached is not None:
+            return cached.get("articles", [])
+
+        if not validate_url_domain(REGULATION_OLDVER_URL):
+            raise ValueError(f"域名不在白名單中: {REGULATION_OLDVER_URL}")
+        params = {"pcode": pcode, "lnndate": lnndate, "lser": lser}
+
+        # 全國法規資料庫在連續大量請求時會偶發丟連線，重試 3 次（遞增退避）
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
+                resp = await self.client.get(REGULATION_OLDVER_URL, params=params)
+                resp.raise_for_status()
+                parsed = parse_law_all(resp.text)
+                articles = parsed.get("articles", [])
+                if not articles:
+                    # 全文頁竟解析不出任何條文 → 視為失敗（避免誤判整版為空）
+                    raise ValueError("版本全文解析為空")
+                # 歷史版本不會再變動，可長期快取
+                await self.cache.set_regulation(pcode, {"articles": articles}, cache_key)
+                return articles
+            except (httpx.HTTPError, ValueError) as e:
+                last_exc = e
+                if attempt < 2 and _is_retryable_http_error(e):
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    continue
+                break
+        raise last_exc  # type: ignore[misc]
+
+    async def get_article_history(self, pcode: str, article_no: str) -> dict:
+        """查詢「單一條文」的歷次條文內容（跨版本前後對比）。
+
+        作法：抓版本清單 → 並發抓各版本全文 → 抽出目標條文 → 折疊連續相同內容，
+        得到該條文真正發生變動的時間軸（首次制定/增訂、歷次修正、刪除、回復）。
+
+        正確性原則：刪除只認「（刪除）」標記，抓取失敗或解析缺漏一律跳過並列入
+        failed_versions（標記 partial），絕不因「該版查無此條」就捏造刪除事件。
+        """
+        target = _normalize_article_no(article_no)
+        try:
+            versions = await self._fetch_version_list(pcode)
+        except httpx.HTTPError as e:
+            logger.warning("查詢歷史版本清單失敗 (pcode=%s): %s", pcode, e)
+            return {"available": False, "reason": "連線全國法規資料庫失敗"}
+
+        if not versions:
+            return {"available": False, "reason": "查無歷史版本資料"}
+
+        # 並發抓各版本全文（限流，避免對全國法規資料庫造成壓力）
+        sem = asyncio.Semaphore(4)
+
+        async def _one(v: dict) -> tuple[dict, str, str | None]:
+            """回傳 (version, status, content)；status: found / absent / error"""
+            async with sem:
+                try:
+                    articles = await self._fetch_version_articles(
+                        pcode, v["lnndate"], v["lser"]
+                    )
+                except Exception as e:
+                    logger.warning("查詢歷史版本全文失敗 (pcode=%s, lnndate=%s): %s",
+                                   pcode, v["lnndate"], e or type(e).__name__)
+                    return v, "error", None
+            for a in articles:
+                if _normalize_article_no(a.get("number", "")) == target:
+                    return v, "found", a.get("content", "")
+            return v, "absent", None  # 成功抓到該版，但該版無此條
+
+        results = await asyncio.gather(*[_one(v) for v in versions])
+
+        # 折疊成真正的修法時間軸
+        _DELETED_MARKERS = {"（刪除）", "(刪除)", "刪除"}
+        revisions: list[dict] = []
+        failed_versions: list[str] = []
+        last_state: str | None = None  # None=尚未制定；"deleted"；或現行內容的正規化字串
+        incomplete_baseline = False    # 最早可觀測版本即為刪除，缺刪除前原文
+
+        def _emit(v: dict, action: str, content: str | None):
+            revisions.append({
+                "date": v["date"], "lnndate": v["lnndate"],
+                "action": action, "content": content,
+            })
+
+        for idx, (v, status, content) in enumerate(results):
+            if status == "error":
+                failed_versions.append(v["date"])
+                continue
+            if status == "absent":
+                if last_state is not None:
+                    # 制定後卻在某版查無此條（非「（刪除）」標記）→ 視為解析缺漏，不捏造刪除
+                    failed_versions.append(f"{v['date']}（該版解析缺漏）")
+                continue
+
+            # status == "found"
+            is_deleted = (content or "").strip() in _DELETED_MARKERS
+            norm = re.sub(r"\s+", "", content or "")
+            if last_state is None:
+                if is_deleted:
+                    # 首次觀測到即為「（刪除）」（通常因更早的「制定/增訂」版本抓取失敗，
+                    # 故無法得知原始條文）。仍 emit 可觀測到的刪除事件，不可靜默吞掉，
+                    # 並標記 baseline 不完整（不依賴 failed_versions 是否非空）。
+                    _emit(v, "刪除", "（刪除）")
+                    last_state = "deleted"
+                    incomplete_baseline = True
+                else:
+                    _emit(v, "制定" if idx == 0 else "增訂", content)
+                    last_state = norm
+            else:
+                if is_deleted and last_state != "deleted":
+                    _emit(v, "刪除", "（刪除）")
+                    last_state = "deleted"
+                elif not is_deleted and last_state == "deleted":
+                    _emit(v, "回復", content)  # 刪除後回復條文
+                    last_state = norm
+                elif not is_deleted and norm != last_state:
+                    _emit(v, "修正", content)
+                    last_state = norm
+                # 內容未變 → 不發事件
+
+        # 若沒有任何版本成功讀取（全部抓取/解析失敗），不可回傳 available:True + 空 revisions，
+        # 否則呼叫端會把它誤解為「確實無修法歷史」。
+        error_count = sum(1 for (_, status, _) in results if status == "error")
+        if error_count == len(versions):
+            return {
+                "available": False,
+                "reason": "歷史版本全文皆抓取失敗，無法重建條文時間軸",
+                "article_no": article_no,
+                "versions_scanned": len(versions),
+                "failed_versions": failed_versions,
+            }
+
+        result: dict = {
+            "available": True,
+            "article_no": article_no,
+            "versions_scanned": len(versions),
+            "revision_count": len(revisions),
+            "revisions": revisions,
+            "source_url": f"{REGULATION_OLDVERLIST_URL}?pcode={quote(pcode, safe='')}",
+        }
+        notes: list[str] = []
+        if incomplete_baseline:
+            notes.append("最早可觀測到的版本即為「（刪除）」，未能取得刪除前的原始條文，時間軸可能不完整")
+        if not revisions:
+            notes.append("在所有可成功讀取的版本中均未發現此條文")
+        # baseline 不完整或有版本讀取失敗 → 時間軸非完整，明確標 partial
+        if failed_versions or incomplete_baseline:
+            result["partial"] = True
+        if failed_versions:
+            result["failed_versions"] = failed_versions
+        if notes:
+            result["notes"] = notes
+        return result
