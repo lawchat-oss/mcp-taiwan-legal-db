@@ -185,9 +185,11 @@ query_regulation(law_name="民法", from_no="184", to_no="198")
 # Full law
 query_regulation(law_name="律師法")
 
-# With amendment history
-query_regulation(law_name="勞動基準法", article_no="23", include_history=True)
+# With amendment history; with an article number, also that article's past texts (article_history)
+query_regulation(law_name="勞動基準法", article_no="24", include_history=True)
 ```
+
+With `article_no` and `include_history`, `article_history.revisions` lists each enactment, addition, amendment and deletion of that article with its date and the text at the time, for side-by-side comparison. Only the historical versions whose amendment record touches the article are fetched (Civil Code art. 184 needs 5 of 36), and the version list and version texts are cached; versions that fail to load are listed in `failed_versions` and the result is marked `partial`.
 
 Supports both `law_name` (automatic pcode resolution via `get_pcode`) and direct `pcode`. Sub-articles like `247-1`, `15-1` work.
 </details>

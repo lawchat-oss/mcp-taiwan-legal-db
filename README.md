@@ -181,9 +181,11 @@ query_regulation(law_name="民法", from_no="184", to_no="198")
 # 完整法規
 query_regulation(law_name="律師法")
 
-# 附修法沿革
-query_regulation(law_name="勞動基準法", article_no="23", include_history=True)
+# 附修法沿革；指定條號時另回傳該條歷次條文（article_history）
+query_regulation(law_name="勞動基準法", article_no="24", include_history=True)
 ```
+
+指定條號並開啟 `include_history` 時，`article_history.revisions` 會列出該條每次制定、增訂、修正、刪除的日期與當時條文，可直接前後對照。只讀取修法沿革中動到該條的歷史版本（例如民法第 184 條只需 36 個版本中的 5 個），版本清單與歷史版本全文都會快取；讀取失敗的版本會列在 `failed_versions` 並標 `partial`。
 
 支援 `law_name`（透過 `get_pcode` 自動解析 pcode）或直接傳 `pcode`。子條文如 `247-1`、`15-1` 都支援。
 </details>

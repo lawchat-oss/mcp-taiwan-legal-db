@@ -95,6 +95,12 @@ def parse_law_all(html: str) -> dict:
         if name not in INVALID_LAW_NAMES:
             result["law_name"] = name
 
+    # 修正日期（「民國 113 年 07 月 31 日」→ 西元 YYYYMMDD，與歷史版本 lnndate 同格式）
+    date_el = soup.select_one("#trLNNDate td")
+    m = re.search(r"(\d+)\s*年\s*(\d+)\s*月\s*(\d+)\s*日", date_el.get_text()) if date_el else None
+    if m:
+        result["last_amended"] = f"{int(m.group(1)) + 1911:04d}{int(m.group(2)):02d}{int(m.group(3)):02d}"
+
     # 章節標題 + 條文 — law.moj.gov.tw 結構：
     #   章節標題: div.h3.char-{1,2,3}（編/章/節），位於 .law-reg-content 容器內
     #   條文: div.row > div.col-no + div.col-data

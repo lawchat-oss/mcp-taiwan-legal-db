@@ -194,7 +194,8 @@ class TestParseLawAll:
         <div class="row"><div class="col-no">第 2 條</div><div class="col-data">本法用詞定義如下。</div></div>
         </body></html>
         """
-        result = parse_law_all(html)
+        result = parse_law_all(html.replace("<h2>", '<table><tr id="trLNNDate"><th>修正日期：</th><td>民國 113 年 07 月 31 日 </td></tr></table><h2>'))
+        assert result["last_amended"] == "20240731"
         assert len(result["articles"]) == 2
         assert result["articles"][0]["number"] == "1"
         assert "勞動條件" in result["articles"][0]["content"]

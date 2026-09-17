@@ -294,11 +294,11 @@ async def query_regulation(
         history = get_law_history(pcode)
         if history:
             result["history"] = history
-        # 查詢單一條文時，額外附上該條歷次條文全文（跨版本前後對比）。
-        # 不論成功與否都回傳 article_history，讓呼叫端能區分「歷史抓取失敗」
-        # （available=False + reason）與「確實無歷史/無此條」。
-        if article_no:
-            result["article_history"] = await reg_client.get_article_history(pcode, article_no)
+    # 查詢單一條文時，額外附上該條歷次條文全文（跨版本前後對比）。現行查無此條（例如已刪除）時
+    # 歷史版本仍可能有，照樣查。不論成功與否都回傳 article_history，讓呼叫端能區分「歷史抓取失敗」
+    # （available=False + reason）與「確實無歷史/無此條」。
+    if include_history and article_no:
+        result["article_history"] = await reg_client.get_article_history(pcode, article_no)
 
     return result
 
