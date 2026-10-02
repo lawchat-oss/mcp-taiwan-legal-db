@@ -9,7 +9,7 @@ authors:
 repository-code: https://github.com/lawchat-oss/mcp-taiwan-legal-db
 abstract: >-
   MCP server for Taiwan legal data: judicial judgments, national regulations
-  (11,700+ statutes), and 868 Constitutional Court rulings (Grand Justices'
+  (11,700+ statutes), and 871 Constitutional Court rulings (Grand Justices'
   Interpretations + Constitutional Court Judgments) with full reasoning text,
   citation graph extraction, and offline-first access.
 keywords:

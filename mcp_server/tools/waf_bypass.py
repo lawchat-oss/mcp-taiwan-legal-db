@@ -11,12 +11,13 @@ import os
 import subprocess
 import sys
 import time
-from pathlib import Path
 from typing import Optional
+
+from mcp_server.config import USER_DATA_DIR
 
 logger = logging.getLogger(__name__)
 
-_COOKIE_FILE = Path(__file__).parent.parent / "data" / ".judicial_cookies.json"
+_COOKIE_FILE = USER_DATA_DIR / ".judicial_cookies.json"
 _WARMUP_URL = "https://judgment.judicial.gov.tw/FJUD/Default_AD.aspx"
 
 

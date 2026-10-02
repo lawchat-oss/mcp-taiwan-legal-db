@@ -185,3 +185,26 @@ def test_opinion_documents_exclude_non_justice_submissions():
     ]
     assert [a["url"] for a in build.opinion_documents(atts)] == ["early", "justice"]
     assert [a["url"] for a in build.opinion_documents(atts, require_justice=True)] == ["justice"]
+
+
+def test_live_ruling_lists_pdf_opinions_instead_of_title_text(monkeypatch):
+    """打包後才公布的憲判字走即時查詢：意見書欄位只有附件標題，應回附件清單而非把標題當全文。"""
+    title = "憲法法庭999年憲判字第1號判決蔡大法官彩貞提出協同意見書"
+    page = (
+        '<ul><li class="title">判決字號</li><li class="text">999年憲判字第1號</li></ul>'
+        '<ul><li class="title">主文</li><li class="text">主文內容</li></ul>'
+        '<ul><li class="title">理由</li><li class="text">理由內容</li></ul>'
+        f'<ul><li class="title">意見書</li><li class="text">{title}</li></ul>'
+        f'<a href="/download/download.aspx?id=1">{title}</a>'
+        '<a href="/download/download.aspx?id=2">聲請書</a>'
+    )
+
+    class Resp:
+        status_code, text, url = 200, page, "https://cons.judicial.gov.tw/docdata.aspx?fid=38&id=1"
+
+    monkeypatch.setattr(cc, "_load_new_listing", lambda: {(999, 1): "1"})
+    monkeypatch.setattr(cc, "_fetch", lambda *a, **k: Resp())
+    r = cc.get_interpretation("999年憲判字第1號", include_opinions=True)
+    assert r["has_opinions"] and r["opinions_unavailable"] and "opinions" not in r
+    assert [(d["authors"], d["type"]) for d in r["opinion_documents"]] == [(["蔡彩貞"], "協同")]
+    assert r["opinion_documents"][0]["url"] == "https://cons.judicial.gov.tw/download/download.aspx?id=1"

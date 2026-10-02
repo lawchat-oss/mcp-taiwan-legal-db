@@ -8,7 +8,7 @@
 
 - **司法院裁判書** — judgment.judicial.gov.tw（全文搜尋 + 取得）
 - **全國法規資料庫** — law.moj.gov.tw（11,700+ 部法規）
-- **憲法法庭** — cons.judicial.gov.tw（868 筆大法官解釋 + 憲判字，含理由書全文，離線快取）
+- **憲法法庭** — cons.judicial.gov.tw（871 筆大法官解釋 + 憲判字，含理由書全文，離線快取）
 
 以 Python 搭配 [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) 寫成。純工具 wrapper，只連線台灣政府官方來源（詳見下方「資料來源與統計」），不發送任何其他網路請求；憲法法庭資料為內建離線打包。
 
@@ -19,7 +19,7 @@
 | 功能 | 說明 |
 |------|------|
 | **8 個 MCP 工具** | 裁判書搜尋/全文、法規查詢、釋字/憲判字查詢、引用關係圖譜 |
-| **離線快取** | 868 筆大法官解釋與憲判字（含理由書全文，以及從官網 PDF 擷取的大法官意見書全文）從本地資料即時回傳 |
+| **離線快取** | 871 筆大法官解釋與憲判字（含理由書全文，以及從官網 PDF 擷取的大法官意見書全文）從本地資料即時回傳 |
 | **引用關係圖譜** | 從理由書抽取所有引用的釋字/憲判字，追溯憲法學說演變 |
 | **全文搜尋** | 裁判書關鍵字搜尋 + 釋字爭點/理由書全文搜尋 |
 | **混合請求策略** | 預設用 httpx 直打（~0.25s），觸發司法院 F5 WAF 時自動以 Playwright 刷 cookie 後繼續 |
@@ -41,7 +41,7 @@ pip install mcp-taiwan-legal-db
 > uv tool install mcp-taiwan-legal-db
 > uv tool update-shell   # 把工具目錄加進 PATH，重開終端機後生效
 > ```
-> 請**每位使用者各自安裝**（預設裝在使用者目錄）。伺服器執行時會把查詢快取與法規代碼表更新寫在套件目錄旁，裝到 `C:\Program Files` 這類一般使用者無法寫入的共用位置會啟動失敗，目前不支援全使用者共用安裝。
+> 套件目錄只讀不寫：查詢快取、WAF cookies 與每週更新的法規代碼表都寫在每位使用者自己的目錄（Windows：`%LOCALAPPDATA%\mcp-taiwan-legal-db`；macOS / Linux：`~/.cache/mcp-taiwan-legal-db`），所以裝到 `C:\Program Files` 等全使用者共用位置也能用。要改位置可設環境變數 `MCP_TAIWAN_LEGAL_DB_HOME`。
 
 裝完後 entry point `mcp-taiwan-legal-db` 會在 PATH 上。**接到 Claude Code**（任何專案都能用）：
 
@@ -395,7 +395,7 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 
 - 預設用 httpx 直接請求（~0.25s）
 - 偵測到被擋（response 含 `Request Rejected` 或 JS challenge marker `bobcmn` / `TSPD`）自動 fallback 到 Playwright 跑一次 JS challenge
-- 取得 TSPD cookies 後持久化到 `mcp_server/data/.judicial_cookies.json`（0600 權限，已 gitignore）
+- 取得 TSPD cookies 後持久化到使用者資料目錄的 `.judicial_cookies.json`（0600 權限）
 - 後續查詢繼續用 httpx 帶 cookies 執行
 
 `cons.judicial.gov.tw`（釋字）跟 `law.moj.gov.tw`（法規）沒這個問題，不經過 WAF 流程。
@@ -422,26 +422,26 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 | 資料集 | 筆數 | 含理由書 | 含意見書 | 檔案大小 |
 |--------|------|---------|---------|---------|
 | 舊制釋字（old_cases.json） | 813 | 734 | 472 | 7.4 MB |
-| 新制憲判字（new_cases.json） | 55 | 55 | 54 | 1.8 MB |
-| 大法官意見書全文（opinions.zip） | 1,536 份 | — | 1,536 份有全文 | 10.8 MB |
+| 新制憲判字（new_cases.json） | 58 | 58 | 57 | 2.0 MB |
+| 大法官意見書全文（opinions.zip） | 1,541 份 | — | 1,541 份有全文 | 10.8 MB |
 
-釋字 401 號以後與憲判字的大法官意見書，官網只以 PDF 附件公開，已擷取文字打包進 `opinions.zip`，查詢回傳的 `opinion_documents` 會列出每份意見書的標題、官網 PDF 連結與字數。其中 22 份 PDF 的字型無法解碼或頁面為圖片（主要是釋字 735–753 號的部分意見書），改以頁面影像逐字轉錄（回傳時標註 `transcribed`，引用前請核對官網 PDF）。意見書以憲法法庭網站公布的 PDF 為準；全國法規資料庫收錄的早期意見書是事後編修的版本（用字統一、修正筆誤、當事人姓名去識別化），兩者文字可能略有出入。重建方式見 `scripts/build_opinions.py`。
+釋字 401 號以後與憲判字的大法官意見書，官網只以 PDF 附件公開，已擷取文字打包進 `opinions.zip`，查詢回傳的 `opinion_documents` 會列出每份意見書的標題、官網 PDF 連結與字數。其中 22 份 PDF 的字型無法解碼或頁面為圖片（主要是釋字 735–753 號的部分意見書），改以頁面影像逐字轉錄（回傳時標註 `transcribed`，引用前請核對官網 PDF）。意見書以憲法法庭網站公布的 PDF 為準；全國法規資料庫收錄的早期意見書是事後編修的版本（用字統一、修正筆誤、當事人姓名去識別化），兩者文字可能略有出入。重建方式見 `scripts/build_opinions.py`；官網公布新的憲判字後，用 `scripts/build_new_cases.py` 只補新案（含意見書）。
 
 ## 快取
 
 | 資料類型 | TTL | 位置 |
 |---|---|---|
-| 判決全文 | 30 天 | `mcp_server/data/cache/legal_mcp.db`（SQLite，首次啟動時建立） |
+| 判決全文 | 30 天 | 使用者資料目錄的 `legal_mcp.db`（SQLite，首次啟動時建立） |
 | 搜尋結果 | 24 小時 | 同上 |
 | 法規條文 | 7 天 | 同上 |
 | pcode metadata | 30 天 | 同上 |
 | 釋字/憲判字 | 本地資料（不過期） | `mcp_server/data/old_cases.json`、`new_cases.json`、`opinions.zip` |
 
-全部清除：刪掉 `mcp_server/data/cache/legal_mcp.db`。快取檔在 `.gitignore` 內。
+使用者資料目錄：Windows 為 `%LOCALAPPDATA%\mcp-taiwan-legal-db`，macOS / Linux 為 `~/.cache/mcp-taiwan-legal-db`（有設 `XDG_CACHE_HOME` 則在其下），可用環境變數 `MCP_TAIWAN_LEGAL_DB_HOME` 改位置。全部清除：刪掉該目錄下的 `legal_mcp.db`。
 
 ## pcode_all.json 自動更新
 
-伺服器啟動時會檢查 `mcp_server/data/pcode_all.json` 的時間戳。如果最後一次更新在最近的週六之前，會在背景觸發從 `law.moj.gov.tw` 官方 API 重新抓取。失敗會記為 warning，不會阻擋啟動。
+伺服器啟動時會檢查 `pcode_all.json` 的時間戳。如果最後一次更新在最近的週六之前，會在背景觸發從 `law.moj.gov.tw` 官方 API 重新抓取，結果（連同 `law_histories.json`）寫進使用者資料目錄，不動套件內建檔；讀取時內建檔與使用者副本取較新者。失敗會記為 warning，不會阻擋啟動。
 
 手動更新：
 ```bash
@@ -473,7 +473,7 @@ mcp-taiwan-legal-db/
     │   ├── pcode_all.json          # 11,700+ 部法規（內建，~780 KB）
     │   ├── law_histories.json      # 修法沿革（內建，~9.6 MB）
     │   ├── old_cases.json          # 813 筆舊制釋字全文（內建，~7.4 MB）
-    │   ├── new_cases.json          # 55 筆新制憲判字全文（內建，~1.8 MB）
+    │   ├── new_cases.json          # 58 筆新制憲判字全文（內建，~2.0 MB）
     │   └── opinions.zip            # 大法官意見書全文，由官網 PDF 擷取（內建，~10.8 MB）
     ├── models/            # Judgment / Regulation dataclass
     ├── parsers/           # 判決與法規頁面的 HTML parser

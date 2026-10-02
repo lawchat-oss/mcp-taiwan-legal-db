@@ -560,8 +560,8 @@ _STATUTE_PREFIX_STRIP = (
 def _load_known_statute_names() -> set[str]:
     """從 pcode_all.json 載入完整法規名清單"""
     import json
-    from pathlib import Path
-    pcode_path = Path(__file__).resolve().parent.parent / "data" / "pcode_all.json"
+    from mcp_server.config import pcode_data_dir
+    pcode_path = pcode_data_dir() / "pcode_all.json"
     names = set()
     try:
         with open(pcode_path, "r", encoding="utf-8") as f:

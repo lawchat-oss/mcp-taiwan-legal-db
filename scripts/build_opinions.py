@@ -13,7 +13,7 @@ scripts/opinion_transcripts/<網址 sha1>.txt 的人工／影像轉錄稿，並�
 沒有轉錄稿的仍只保留附件連結（chars=0）。
 
 Usage (repo root):
-    uv run --no-project --with httpx --with pypdf python scripts/build_opinions.py [--cache DIR]
+    uv run --with pypdf python scripts/build_opinions.py [--cache DIR]
 
 頁面清單與 PDF 快取在 --cache（預設 .cache/opinions），中斷後可續跑。
 對 cons.judicial.gov.tw 首次完整執行約需數十分鐘。
@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import html
 import io
 import json
 import re
@@ -31,25 +30,18 @@ import unicodedata
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from urllib.parse import urljoin
 
 import httpx
+
+from mcp_server.tools.constitutional_court import opinion_documents, page_attachments, parse_opinion_title
 
 DATA = Path(__file__).resolve().parent.parent / "mcp_server" / "data"
 TRANSCRIPTS = Path(__file__).resolve().parent / "opinion_transcripts"
 UA = "mcp-taiwan-legal-db data build (github.com/lawchat-oss/mcp-taiwan-legal-db)"
 CJK = "\u3000-\u303f\u4e00-\u9fff\uff00-\uffef"  # CJK punctuation, ideographs, fullwidth forms
-# 標題含「意見書」但不是大法官意見書的附件（鑑定、法庭之友、聲請、機關陳述等）
-NOT_JUSTICE = re.compile(r"鑑定|法庭之友|聲請|陳述|相關機關|教授|研究員|律師|醫師|監察院|財政部|政府|基金會|聯盟|協會|公會|研究會|函|簡報|補充|辯論|諮詢|君")
 # 相容漢字（U+F900 起，Big5 轉出的 PDF 常見）與康熙部首（Word 轉出的 PDF 常見）外觀同一般漢字但編碼不同，
 # 不轉換會讓「法律」等關鍵字搜不到。只轉這些區段，不做整體 NFKC，以免全形標點被改成半形。
 COMPAT_HAN = re.compile("[\u2e80-\u2fdf\uf900-\ufaff\U0002f800-\U0002fa1f]")
-# 標題中的大法官姓名有兩種寫法：「許大法官宗力」（姓 + 大法官 + 名）與「蔡宗珍大法官」（全名 + 大法官）
-JUSTICE_SPLIT_NAME = re.compile(
-    r"([\u4e00-\u9fff])大法官([\u4e00-\u9fff]{1,2}?)(?=提出|加入|共同|協同|部分|一部|不同|意見|、|，|之|及|與|均|（|\(|）|\)|\.|$)"
-)
-JUSTICE_FULL_NAME = re.compile(r"([\u4e00-\u9fff]{2,3})大法官(?=提出|加入|、|，|及|與|均|）|\)|$)")
-OPINION_TYPE = re.compile(r"(部分不同部分協同|部分協同部分不同|部分協同|部分不同|一部不同|協同|不同)意見書")
 # 字型無法解碼時抽出的是古木基、僧伽羅、希臘等不相干文字。不用中文字比例判斷：註腳大量引日、英文法條的
 # 意見書（釋字 777 號吳陳鐶）會被誤判，正文亂碼但註腳可讀的（釋字 714 號陳新民、陳春生）又會漏判。
 EXPECTED_LETTERS = re.compile("[\x00-\u017f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uff00-\uffef]")
@@ -75,57 +67,46 @@ def clean_pdf_text(raw: str) -> str:
     return re.sub(rf"(?<=[{CJK}])[ \t]+|[ \t]+(?=[{CJK}])", "", text)
 
 
-def parse_opinion_title(title: str) -> dict:
-    """從標題拆出提出者、加入者與意見書類型；早期標題沒寫姓名時為空清單／None。
-
-    >>> parse_opinion_title("許大法官玉秀提出，林大法官子儀、許大法官宗力加入之部分不同意見書")
-    {'authors': ['許玉秀'], 'joined': ['林子儀', '許宗力'], 'type': '部分不同'}
-    """
-    def names(part: str) -> list[str]:
-        part = re.sub(r"^[\d.]*|^.*?判決", "", part)  # 去掉號次與「…判決」前綴，免得被當成全名的一部分
-        return ["".join(m) for m in JUSTICE_SPLIT_NAME.findall(part)] or JUSTICE_FULL_NAME.findall(part)
-
-    head, sep, tail = title.partition("提出")
-    authors = names(head if sep else title)
-    joined = names(tail.rsplit("加入", 1)[0]) if "加入" in tail else []
-    kind = OPINION_TYPE.search(title)
-    return {"authors": authors, "joined": joined, "type": kind.group(1) if kind else None}
+def url_hash(url: str) -> str:
+    return hashlib.sha1(url.encode()).hexdigest()
 
 
-def page_attachments(page: str, url: str) -> list[dict]:
-    """頁面上所有下載附件的標題與網址。"""
-    atts: list[dict] = []
-    for href, label in re.findall(r'<a[^>]+href="([^"]*download[^"]*)"[^>]*>(.*?)</a>', page, re.I | re.S):
-        link = urljoin(url, html.unescape(href))
-        if all(a["url"] != link for a in atts):
-            atts.append({"title": re.sub(r"<[^>]+>|\s+", " ", html.unescape(label)).strip(), "url": link})
-    return atts
+def extract_document(att: dict, pdf: bytes, cid: str) -> dict:
+    """單份意見書 PDF → {title, url, text[, transcribed]}；抽不出或亂碼時改用 opinion_transcripts 的轉錄稿。"""
+    from pypdf import PdfReader  # build-time only; not a runtime dependency
+
+    text = ""
+    if pdf[:4] == b"%PDF":
+        try:
+            text = clean_pdf_text("\n".join(pg.extract_text() or "" for pg in PdfReader(io.BytesIO(pdf)).pages))
+        except Exception as e:  # 壞檔不中斷整批
+            print(f"extract failed: {cid} {att['title']}: {e}")
+    if text and is_garbled(text):
+        print(f"garbled, skipped: {cid} {att['title']}")
+        text = ""
+    doc = {"title": att["title"], "url": att["url"], "text": text}
+    transcript = TRANSCRIPTS / f"{url_hash(att['url'])}.txt"
+    if not text and transcript.exists():
+        doc["text"] = COMPAT_HAN.sub(lambda m: unicodedata.normalize("NFKC", m.group()), transcript.read_text(encoding="utf-8").strip())
+        doc["transcribed"] = True
+    return doc
 
 
-def opinion_documents(attachments: list[dict], require_justice: bool = False) -> list[dict]:
-    """挑出大法官意見書附件；有單份意見書就不取抄本合訂本。
-
-    憲判字（require_justice=True）的大法官意見書標題一律含「大法官」；舊制早期少數
-    意見書標題沒有（如「387意見書」），改以排除非大法官文件的關鍵字判斷。
-    """
-    atts = [
-        a for a in attachments
-        if "意見書" in a["title"] and "打包" not in a["title"]
-        and (
-            "大法官" in a["title"]
-            # 抄本是法院的合訂本（標題會列出內含聲請書等），不套用排除清單
-            or (not require_justice and ("抄本" in a["title"] or not NOT_JUSTICE.search(a["title"])))
-        )
+def set_case_opinions(case: dict, docs: list[dict]) -> None:
+    """在 cases JSON 的案件上補 has_opinions 與 opinion_documents（全文另存 opinions.zip）。"""
+    case["opinions"] = ""  # 舊資料在此欄只有附件標題；全文改由 opinions.zip 提供
+    case["has_opinions"] = any(d["text"] for d in docs)
+    case["opinion_documents"] = [
+        {"title": d["title"], **parse_opinion_title(d["title"]), "url": d["url"], "chars": len(d["text"]),
+         **({"transcribed": True} if d.get("transcribed") else {})}
+        for d in docs
     ]
-    return [a for a in atts if "抄本" not in a["title"]] or atts
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--cache", type=Path, default=Path(".cache/opinions"))
     args = ap.parse_args()
-    from pypdf import PdfReader  # build-time only; not a runtime dependency
-
     def attachments(entry: dict) -> list[dict]:
         return [{"title": a.get("title") or a.get("label", ""), "url": a["url"]} for a in entry.get("attachments", [])]
 
@@ -152,9 +133,6 @@ def main() -> None:
             time.sleep(0.7)
 
     # 2. 下載 PDF（3 條連線，快取於 pdf/<sha1>.bin）
-    def url_hash(url: str) -> str:
-        return hashlib.sha1(url.encode()).hexdigest()
-
     def pdf_path(url: str) -> Path:
         return args.cache / "pdf" / (url_hash(url) + ".bin")
 
@@ -197,34 +175,14 @@ def main() -> None:
             docs = []
             for a in atts:
                 p = pdf_path(a["url"])
-                text = ""
-                if p.exists() and p.read_bytes()[:4] == b"%PDF":
-                    try:
-                        text = clean_pdf_text("\n".join(pg.extract_text() or "" for pg in PdfReader(io.BytesIO(p.read_bytes())).pages))
-                    except Exception as e:  # 壞檔不中斷整批
-                        print(f"extract failed: {cid} {a['title']}: {e}")
-                if text and is_garbled(text):
-                    print(f"garbled, skipped: {cid} {a['title']}")
-                    text = ""
-                doc = {"title": a["title"], "url": a["url"], "text": text}
-                transcript = TRANSCRIPTS / f"{url_hash(a['url'])}.txt"
-                if not text and transcript.exists():
-                    doc["text"] = COMPAT_HAN.sub(lambda m: unicodedata.normalize("NFKC", m.group()), transcript.read_text(encoding="utf-8").strip())
-                    doc["transcribed"] = True
-                docs.append(doc)
+                docs.append(extract_document(a, p.read_bytes() if p.exists() else b"", cid))
             stats["cases"] += 1
             stats["documents"] += len(docs)
             stats["extracted"] += sum(1 for d in docs if d["text"])
             stats["chars"] += sum(len(d["text"]) for d in docs)
             if any(d["text"] for d in docs):
                 zf.writestr(f"{kind}/{key}.json", json.dumps({"documents": docs}, ensure_ascii=False))
-            case["opinions"] = ""  # 舊資料在此欄只有附件標題；全文改由 opinions.zip 提供
-            case["has_opinions"] = any(d["text"] for d in docs)
-            case["opinion_documents"] = [
-                {"title": d["title"], **parse_opinion_title(d["title"]), "url": d["url"], "chars": len(d["text"]),
-                 **({"transcribed": True} if d.get("transcribed") else {})}
-                for d in docs
-            ]
+            set_case_opinions(case, docs)
 
     for kind, cases in datasets.items():
         (DATA / f"{kind}_cases.json").write_text(json.dumps(cases, ensure_ascii=False), encoding="utf-8")

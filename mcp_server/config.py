@@ -22,10 +22,47 @@
 from mcp_server.ssl_setup import inject_os_trust_store
 inject_os_trust_store()
 
+import json
+import os
+import sys
 from pathlib import Path
 
-# 專案根目錄（相對於此檔案自動解析，不硬編碼路徑）
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# 套件內建資料（唯讀：裝在 C:\Program Files、系統 site-packages 時一般使用者不能寫）
+BUNDLED_DATA_DIR = Path(__file__).resolve().parent / "data"
+
+
+def _user_data_dir() -> Path:
+    """執行期會寫入的檔案（查詢快取、WAF cookies、每週更新的法規代碼表）放這裡。
+
+    可用環境變數 MCP_TAIWAN_LEGAL_DB_HOME 指定；預設為每位使用者自己的快取目錄。
+    """
+    if env := os.environ.get("MCP_TAIWAN_LEGAL_DB_HOME"):
+        return Path(env).expanduser()
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local"
+    else:
+        base = os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
+    return Path(base) / "mcp-taiwan-legal-db"
+
+
+USER_DATA_DIR = _user_data_dir()
+
+
+def pcode_data_dir() -> Path:
+    """pcode_all.json / law_histories.json 的讀取目錄。
+
+    每週自動更新寫進 USER_DATA_DIR；但升級套件後內建檔可能比舊的使用者副本新，
+    所以比 update_date，較新的勝出。
+    """
+    def update_date(d: Path) -> str:
+        try:
+            return json.loads((d / "pcode_all.json").read_text("utf-8")).get("update_date", "")
+        except (OSError, ValueError):
+            return ""
+
+    user = update_date(USER_DATA_DIR)
+    return USER_DATA_DIR if user and user >= update_date(BUNDLED_DATA_DIR) else BUNDLED_DATA_DIR
+
 
 # 允許的域名（資安 allow-list，validate_url_domain 會拒絕其他所有 host）
 ALLOWED_DOMAINS = [
@@ -34,7 +71,7 @@ ALLOWED_DOMAINS = [
 ]
 
 # 快取設定
-CACHE_DB_PATH = PROJECT_ROOT / "data" / "cache" / "legal_mcp.db"
+CACHE_DB_PATH = USER_DATA_DIR / "legal_mcp.db"
 CACHE_JUDGMENT_TTL = 2592000   # 30 天（判決書少有變動，但 parser 更新後需要刷新快取）
 CACHE_SEARCH_TTL = 86400       # 24 小時
 CACHE_REGULATION_TTL = 604800  # 7 天

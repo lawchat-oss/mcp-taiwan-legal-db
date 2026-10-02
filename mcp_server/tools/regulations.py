@@ -5,7 +5,6 @@ import json
 import logging
 import re
 import unicodedata
-from pathlib import Path
 from urllib.parse import quote
 
 import httpx
@@ -16,6 +15,8 @@ from mcp_server.config import (
     REGULATION_OLDVERLIST_URL,
     REGULATION_OLDVER_URL,
     PCODE_MAP,
+    BUNDLED_DATA_DIR,
+    pcode_data_dir,
     validate_url_domain,
 )
 from mcp_server.cache.db import CacheDB
@@ -25,12 +26,11 @@ from mcp_server.tools._errors import error_response
 logger = logging.getLogger(__name__)
 
 # 載入完整 pcode 清單（11,747 部法規，從 law.moj.gov.tw API 生成）
-_PCODE_ALL_PATH = Path(__file__).parent.parent / "data" / "pcode_all.json"
+_PCODE_ALL_PATH = BUNDLED_DATA_DIR / "pcode_all.json"  # 內建版；執行期讀 pcode_data_dir()
 _PCODE_ALL: dict[str, str] = {}
 _PCODE_REVERSE: dict[str, str] = {}  # pcode → name
 _ABOLISHED_SET: set[str] = set()  # 已廢止法規的 pcode 集合
 _LAW_HISTORIES: dict[str, str] = {}  # pcode → 修法沿革文字
-_LAW_HISTORIES_PATH = Path(__file__).parent.parent / "data" / "law_histories.json"
 
 
 def _load_pcode_all():
@@ -39,7 +39,7 @@ def _load_pcode_all():
     if _PCODE_ALL:
         return
     try:
-        with open(_PCODE_ALL_PATH, "r", encoding="utf-8") as f:
+        with open(pcode_data_dir() / "pcode_all.json", "r", encoding="utf-8") as f:
             data = json.load(f)
         _PCODE_ALL = data.get("pcode_map", {})
         _PCODE_REVERSE = {v: k for k, v in _PCODE_ALL.items()}
@@ -60,8 +60,11 @@ def _load_pcode_all():
 
 def _load_law_histories():
     """載入修法沿革資料"""
+    path = pcode_data_dir() / "law_histories.json"
+    if not path.exists():
+        path = BUNDLED_DATA_DIR / "law_histories.json"
     try:
-        with open(_LAW_HISTORIES_PATH, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         _LAW_HISTORIES.clear()
         _LAW_HISTORIES.update(data)
@@ -80,7 +83,7 @@ def reload_pcode_all():
     空窗從「檔案 I/O + JSON parse」縮短到「記憶體操作」。
     """
     try:
-        with open(_PCODE_ALL_PATH, "r", encoding="utf-8") as f:
+        with open(pcode_data_dir() / "pcode_all.json", "r", encoding="utf-8") as f:
             data = json.load(f)
         new_map = data.get("pcode_map", {})
         if len(new_map) < 10_000:

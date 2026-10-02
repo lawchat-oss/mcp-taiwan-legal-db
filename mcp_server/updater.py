@@ -29,8 +29,10 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-PCODE_ALL_PATH = Path(__file__).resolve().parent / "data" / "pcode_all.json"
-LAW_HISTORIES_PATH = Path(__file__).resolve().parent / "data" / "law_histories.json"
+from mcp_server.config import USER_DATA_DIR, pcode_data_dir
+
+# 更新結果寫進使用者目錄（套件目錄可能唯讀）；讀取時由 pcode_data_dir() 和內建版比新舊
+PCODE_ALL_PATH = USER_DATA_DIR / "pcode_all.json"
 
 LAW_API_URL = "https://law.moj.gov.tw/api/Ch/Law/JSON"
 ORDER_API_URL = "https://law.moj.gov.tw/api/Ch/Order/JSON"
@@ -220,7 +222,7 @@ def should_update_saturday(path: Path | None = None) -> tuple[bool, str]:
     Returns:
         (should_update, reason)
     """
-    path = path or PCODE_ALL_PATH
+    path = path or pcode_data_dir() / "pcode_all.json"
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)

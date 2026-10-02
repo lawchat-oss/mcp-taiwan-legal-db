@@ -6,7 +6,7 @@ A Model Context Protocol (MCP) server that gives any MCP-compatible AI assistant
 
 - **Judicial Yuan judgments** — judgment.judicial.gov.tw (full-text search + get)
 - **National regulation database** — law.moj.gov.tw (11,700+ laws and ordinances)
-- **Constitutional Court** — 868 Grand Justices interpretations (釋字) and Constitutional Court judgments (憲判字), with full reasoning text, served offline from a bundled cache
+- **Constitutional Court** — 871 Grand Justices interpretations (釋字) and Constitutional Court judgments (憲判字), with full reasoning text, served offline from a bundled cache
 
 Written in Python with the [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk). Pure tool wrapper — it makes no network calls outside the official Taiwan government sources listed under [Data sources](#data-sources).
 
@@ -23,7 +23,7 @@ Taiwan's legal data is public. Open-sourcing this so nobody has to write the sam
 | Feature | Description |
 |---------|-------------|
 | **8 MCP tools** | Judgment search / full text, regulation queries, 釋字 / 憲判字 lookup, citation graph |
-| **Offline cache** | 868 Grand Justices interpretations and Constitutional Court judgments (with full reasoning text, plus Justices' opinions extracted from the official PDFs) served instantly from bundled data |
+| **Offline cache** | 871 Grand Justices interpretations and Constitutional Court judgments (with full reasoning text, plus Justices' opinions extracted from the official PDFs) served instantly from bundled data |
 | **Citation graph** | Extracts every 釋字 / 憲判字 cited in an interpretation's reasoning, for tracing the evolution of constitutional doctrine |
 | **Full-text search** | Keyword search over judgments + 釋字 issue / reasoning full text |
 | **Hybrid request strategy** | httpx direct by default (~0.25s); auto-falls back to Playwright to clear the Judicial Yuan F5 WAF, then resumes |
@@ -45,7 +45,7 @@ pip install mcp-taiwan-legal-db
 > uv tool install mcp-taiwan-legal-db
 > uv tool update-shell   # adds the tool directory to PATH; restart the terminal afterwards
 > ```
-> Install it **per user** (the default location is in the user profile). At runtime the server writes its query cache and statute-code table updates next to the package, so a shared all-users location that regular users cannot write to (such as `C:\Program Files`) fails at startup. All-users shared installs are not supported yet.
+> The package directory is only read, never written: the query cache, WAF cookies and the weekly statute-code table updates live in each user's own directory (Windows: `%LOCALAPPDATA%\mcp-taiwan-legal-db`; macOS / Linux: `~/.cache/mcp-taiwan-legal-db`), so shared all-users locations such as `C:\Program Files` work too. Set the `MCP_TAIWAN_LEGAL_DB_HOME` environment variable to use a different directory.
 
 After install, the `mcp-taiwan-legal-db` entry point is on your PATH. **Wire it into Claude Code** (available from any project):
 
@@ -427,7 +427,7 @@ This project uses a hybrid strategy:
 
 - Requests go out via httpx directly by default (~0.25s)
 - When a block is detected (response contains `Request Rejected` or JS challenge markers `bobcmn` / `TSPD`), it falls back to Playwright to execute the JS challenge
-- The resulting TSPD cookies are persisted to `mcp_server/data/.judicial_cookies.json` (0600 permissions, gitignored)
+- The resulting TSPD cookies are persisted to `.judicial_cookies.json` in the user data directory (0600 permissions)
 - Subsequent queries resume via httpx with the refreshed cookies
 
 `cons.judicial.gov.tw` (Constitutional Court) and `law.moj.gov.tw` (regulations) are not affected — they bypass the WAF path entirely.
@@ -454,26 +454,26 @@ The Constitutional Court corpus (釋字 / 憲判字) is **not** fetched at query
 | Dataset | Records | With reasoning | With opinions | Size |
 |---------|---------|----------------|---------------|------|
 | Grand Justices interpretations (`old_cases.json`) | 813 | 734 | 472 | 7.4 MB |
-| Constitutional Court judgments (`new_cases.json`) | 55 | 55 | 54 | 1.8 MB |
-| Justices' opinions, full text (`opinions.zip`) | 1,536 documents | — | 1,536 with full text | 10.8 MB |
+| Constitutional Court judgments (`new_cases.json`) | 58 | 58 | 57 | 2.0 MB |
+| Justices' opinions, full text (`opinions.zip`) | 1,541 documents | — | 1,541 with full text | 10.8 MB |
 
-From 釋字 No. 401 onward, and for all 憲判字, the official site publishes Justices' opinions only as PDF attachments. Their text is extracted and bundled in `opinions.zip`; responses include `opinion_documents` with each opinion's title, official PDF link and character count. 22 PDFs use fonts that cannot be decoded or contain page images (mostly some opinions in 釋字 Nos. 735–753); they were transcribed verbatim from the page images (flagged `transcribed`; check the official PDF before quoting). The Constitutional Court's published PDFs are treated as authoritative; the National Regulations Database carries later-edited versions of earlier opinions (normalized wording, corrected typos, party names redacted), so wording may differ slightly. Rebuild with `scripts/build_opinions.py`.
+From 釋字 No. 401 onward, and for all 憲判字, the official site publishes Justices' opinions only as PDF attachments. Their text is extracted and bundled in `opinions.zip`; responses include `opinion_documents` with each opinion's title, official PDF link and character count. 22 PDFs use fonts that cannot be decoded or contain page images (mostly some opinions in 釋字 Nos. 735–753); they were transcribed verbatim from the page images (flagged `transcribed`; check the official PDF before quoting). The Constitutional Court's published PDFs are treated as authoritative; the National Regulations Database carries later-edited versions of earlier opinions (normalized wording, corrected typos, party names redacted), so wording may differ slightly. Rebuild with `scripts/build_opinions.py`; when the court publishes new 憲判字, `scripts/build_new_cases.py` adds just the new cases (with their opinions).
 
 ## Caching
 
 | Data type | TTL | Location |
 |---|---|---|
-| Judgment full text | 30 days | `mcp_server/data/cache/legal_mcp.db` (SQLite, created on first run) |
+| Judgment full text | 30 days | `legal_mcp.db` in the user data directory (SQLite, created on first run) |
 | Search results | 24 hours | same |
 | Regulation articles | 7 days | same |
 | pcode metadata | 30 days | same |
 | 釋字 / 憲判字 | bundled data (never expires) | `mcp_server/data/old_cases.json`, `new_cases.json`, `opinions.zip` |
 
-Flush everything: delete `mcp_server/data/cache/legal_mcp.db`. The cache file is in `.gitignore`.
+User data directory: `%LOCALAPPDATA%\mcp-taiwan-legal-db` on Windows, `~/.cache/mcp-taiwan-legal-db` on macOS / Linux (under `XDG_CACHE_HOME` if set); override it with the `MCP_TAIWAN_LEGAL_DB_HOME` environment variable. Flush everything: delete `legal_mcp.db` in that directory.
 
 ## pcode_all.json auto-update
 
-On startup, the server checks the age of `mcp_server/data/pcode_all.json`. If the last update was before the most recent Saturday, it triggers a background refresh from `law.moj.gov.tw` official API. Failures are logged as warnings and do not block startup.
+On startup, the server checks the age of `pcode_all.json`. If the last update was before the most recent Saturday, it triggers a background refresh from `law.moj.gov.tw` official API and writes the result (together with `law_histories.json`) to the user data directory, leaving the bundled files untouched; on read, whichever of the bundled file and the user copy is newer wins. Failures are logged as warnings and do not block startup.
 
 Manual refresh:
 ```bash
@@ -505,7 +505,7 @@ mcp-taiwan-legal-db/
     │   ├── pcode_all.json          # 11,700+ regulations (bundled, ~780 KB)
     │   ├── law_histories.json      # Amendment history (bundled, ~9.6 MB)
     │   ├── old_cases.json          # 813 Grand Justices interpretations, full text (bundled, ~7.4 MB)
-    │   ├── new_cases.json          # 55 Constitutional Court judgments, full text (bundled, ~1.8 MB)
+    │   ├── new_cases.json          # 58 Constitutional Court judgments, full text (bundled, ~2.0 MB)
     │   └── opinions.zip            # Justices' opinions extracted from official PDFs (bundled, ~10.8 MB)
     ├── models/            # Judgment / Regulation dataclasses
     ├── parsers/           # HTML parsers for judgment and regulation pages

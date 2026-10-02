@@ -17,12 +17,14 @@ MCP tool 註冊在 server.py，本模組只匯出核心函式。
 
 from __future__ import annotations
 
+import html
 import json
 import re
 import time
 import zipfile
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urljoin
 
 import httpx
 from bs4 import BeautifulSoup
@@ -276,6 +278,65 @@ def _parse_doc_page(html: str) -> dict[str, str]:
             continue
         fields[title] = text
     return fields
+
+
+# ─────────────────────────────────────────────────────────────
+# 意見書附件（官網頁面只列標題與 PDF 連結；scripts/build_opinions.py 也用這幾個函式）
+# ─────────────────────────────────────────────────────────────
+
+# 標題含「意見書」但不是大法官意見書的附件（鑑定、法庭之友、聲請、機關陳述等）
+NOT_JUSTICE = re.compile(r"鑑定|法庭之友|聲請|陳述|相關機關|教授|研究員|律師|醫師|監察院|財政部|政府|基金會|聯盟|協會|公會|研究會|函|簡報|補充|辯論|諮詢|君")
+# 標題中的大法官姓名有兩種寫法：「許大法官宗力」（姓 + 大法官 + 名）與「蔡宗珍大法官」（全名 + 大法官）
+JUSTICE_SPLIT_NAME = re.compile(
+    r"([\u4e00-\u9fff])大法官([\u4e00-\u9fff]{1,2}?)(?=提出|加入|共同|協同|部分|一部|不同|意見|、|，|之|及|與|均|（|\(|）|\)|\.|$)"
+)
+JUSTICE_FULL_NAME = re.compile(r"([\u4e00-\u9fff]{2,3})大法官(?=提出|加入|、|，|及|與|均|）|\)|$)")
+OPINION_TYPE = re.compile(r"(部分不同部分協同|部分協同部分不同|部分協同|部分不同|一部不同|協同|不同)意見書")
+
+
+def parse_opinion_title(title: str) -> dict:
+    """從標題拆出提出者、加入者與意見書類型；早期標題沒寫姓名時為空清單／None。
+
+    >>> parse_opinion_title("許大法官玉秀提出，林大法官子儀、許大法官宗力加入之部分不同意見書")
+    {'authors': ['許玉秀'], 'joined': ['林子儀', '許宗力'], 'type': '部分不同'}
+    """
+    def names(part: str) -> list[str]:
+        part = re.sub(r"^[\d.]*|^.*?判決", "", part)  # 去掉號次與「…判決」前綴，免得被當成全名的一部分
+        return ["".join(m) for m in JUSTICE_SPLIT_NAME.findall(part)] or JUSTICE_FULL_NAME.findall(part)
+
+    head, sep, tail = title.partition("提出")
+    authors = names(head if sep else title)
+    joined = names(tail.rsplit("加入", 1)[0]) if "加入" in tail else []
+    kind = OPINION_TYPE.search(title)
+    return {"authors": authors, "joined": joined, "type": kind.group(1) if kind else None}
+
+
+def page_attachments(page: str, url: str) -> list[dict]:
+    """頁面上所有下載附件的標題與網址。"""
+    atts: list[dict] = []
+    for href, label in re.findall(r'<a[^>]+href="([^"]*download[^"]*)"[^>]*>(.*?)</a>', page, re.I | re.S):
+        link = urljoin(url, html.unescape(href))
+        if all(a["url"] != link for a in atts):
+            atts.append({"title": re.sub(r"<[^>]+>|\s+", " ", html.unescape(label)).strip(), "url": link})
+    return atts
+
+
+def opinion_documents(attachments: list[dict], require_justice: bool = False) -> list[dict]:
+    """挑出大法官意見書附件；有單份意見書就不取抄本合訂本。
+
+    憲判字（require_justice=True）的大法官意見書標題一律含「大法官」；舊制早期少數
+    意見書標題沒有（如「387意見書」），改以排除非大法官文件的關鍵字判斷。
+    """
+    atts = [
+        a for a in attachments
+        if "意見書" in a["title"] and "打包" not in a["title"]
+        and (
+            "大法官" in a["title"]
+            # 抄本是法院的合訂本（標題會列出內含聲請書等），不套用排除清單
+            or (not require_justice and ("抄本" in a["title"] or not NOT_JUSTICE.search(a["title"])))
+        )
+    ]
+    return [a for a in atts if "抄本" not in a["title"]] or atts
 
 
 def _sanity_check(
@@ -882,9 +943,23 @@ def _get_new_ruling(
     _attach_long_field(
         result, parsed.get("理由", ""), "reasoning", include_reasoning, reasoning_keyword
     )
-    _attach_html_opinions(
-        result, parsed.get(NEW_OPINIONS_KEY, ""), include_opinions, opinions_keyword, opinion_document, opinions_offset
-    )
+    # 憲判字頁面的「意見書」欄位只是附件標題清單，全文在 PDF；打包後才公布的新案只能給附件連結
+    docs = opinion_documents(page_attachments(r.text, str(r.url)), require_justice=True)
+    if docs:
+        result["has_opinions"] = True
+        result["opinion_documents"] = [
+            {"title": d["title"], **parse_opinion_title(d["title"]), "url": d["url"]} for d in docs
+        ]
+        if include_opinions or opinions_keyword or opinion_document:
+            result["opinions_unavailable"] = True
+            result["opinions_hint"] = (
+                "本案在資料包建置後才公布，意見書全文目前只有官網 PDF，請開 opinion_documents 的 url 閱讀；"
+                "下一版資料包會收錄全文。"
+            )
+    else:
+        _attach_html_opinions(
+            result, parsed.get(NEW_OPINIONS_KEY, ""), include_opinions, opinions_keyword, opinion_document, opinions_offset
+        )
 
     return result
 
