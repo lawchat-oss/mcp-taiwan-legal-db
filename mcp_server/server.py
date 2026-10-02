@@ -12,6 +12,8 @@ from mcp_server.tools.regulations import RegulationClient
 from mcp_server.tools.judicial_search import JudicialSearchClient
 from mcp_server.tools.judicial_doc import JudgmentDocClient
 from mcp_server.tools.waf_bypass import JudicialWAFBypass
+from mcp_server.tools.agency_interpretations import AgencyInterpretationClient
+from mcp_server.tools.fint import PrecedentClient
 from mcp_server.tools.constitutional_court import (
     get_interpretation as _cc_get_interpretation,
     search_interpretations as _cc_search_interpretations,
@@ -35,6 +37,8 @@ reg_client: RegulationClient | None = None
 jud_search: JudicialSearchClient | None = None
 jud_doc: JudgmentDocClient | None = None
 waf: JudicialWAFBypass | None = None
+interp: AgencyInterpretationClient | None = None
+precedents: PrecedentClient | None = None
 
 
 async def _maybe_update_pcode_all():
@@ -68,7 +72,7 @@ def _log_background_task_exception(task: asyncio.Task) -> None:
 @asynccontextmanager
 async def lifespan(server: MCPServer):
     """伺服器生命週期：啟動時初始化，關閉時清理"""
-    global cache, reg_client, jud_search, jud_doc, waf
+    global cache, reg_client, jud_search, jud_doc, waf, interp, precedents
 
     # 啟動
     cache = CacheDB()
@@ -80,6 +84,8 @@ async def lifespan(server: MCPServer):
     reg_client = RegulationClient(cache)
     jud_search = JudicialSearchClient(cache, waf)
     jud_doc = JudgmentDocClient(cache, waf)
+    interp = AgencyInterpretationClient(cache)
+    precedents = PrecedentClient(cache)
 
     logger.info("台灣法律資料庫 MCP Server 已啟動")
 
@@ -99,6 +105,8 @@ async def lifespan(server: MCPServer):
     await reg_client.close()
     await jud_search.close()
     await jud_doc.close()
+    await interp.close()
+    await precedents.close()
     await cache.close()
     logger.info("MCP Server 已關閉")
 
@@ -107,7 +115,8 @@ async def lifespan(server: MCPServer):
 mcp = MCPServer(
     name="台灣法律資料庫",
     instructions=(
-        "查詢司法院裁判書、全國法規資料庫、大法官解釋（釋字）與憲法法庭裁判（憲判字）的 MCP 工具。"
+        "查詢司法院裁判書、全國法規資料庫、大法官解釋（釋字）與憲法法庭裁判（憲判字）、"
+        "各部會行政函釋，以及最高法院決議、法律問題座談、判例等判解的 MCP 工具。"
         "釋字/憲判字預設層與理由書從本地快取即時回傳，無需連網。"
     ),
     lifespan=lifespan,
@@ -498,6 +507,125 @@ def get_citations(
         include_context: 每個引用附上原文前後 80 字片段
     """
     return _cc_get_citations(case_id, include_context)
+
+
+# ============================================================
+# 工具 9：搜尋行政機關函釋
+# ============================================================
+
+@mcp.tool()
+async def search_agency_interpretations(
+    keyword: str = "",
+    agency: str = "",
+    year_from: int = 0,
+    year_to: int = 0,
+    doc_number: str = "",
+    page: int = 1,
+) -> dict:
+    """搜尋各部會的行政函釋（解釋令、函釋、法規諮詢意見），即時查詢各機關官方系統。
+
+    來源：法務部（行政函釋、法規諮詢意見）、勞動部（行政函釋、解釋令）、工程會（政府採購法令）、
+    財政部（各稅法令彙編、新頒令釋）、經濟部商業發展署（公司法、商業登記法等）、經濟部智慧財產局（著作權）、
+    衛生福利部、內政部戶政司、內政部國土管理署（建築管理、都市計畫、住宅）、
+    司法院法學資料檢索系統（跨機關函釋），以及行政院公報（各部會的解釋性規定）。
+    不指定 agency 時查全部來源；同一件函釋在多個來源出現時只保留一筆。
+
+    結果依發文日期新到舊排列，每筆含 id、agency、category、doc_number（發文字號）、date、summary（要旨或主旨）。
+    要讀全文請把 id 傳給 get_agency_interpretation。categories 列出每個來源/類別的總筆數與是否還有下一頁；
+    某來源連線失敗時該類別帶 error，其他來源照常回傳。
+
+    Args:
+        keyword: 關鍵字（全文檢索；多個詞以空白分隔）。查特定法條時可用「勞動基準法第24條」這類寫法
+        agency: 機關名稱，可用逗號分隔多個，例如「勞動部」「財政部,經濟部」「衛福部」「工程會」「內政部」。
+            沒有專屬系統的機關（如金管會、交通部）改查行政院公報中該機關發布的解釋性規定
+        year_from: 起始年度（民國年，如 110）
+        year_to: 截止年度（民國年，如 114）
+        doc_number: 發文字號或其號碼（如「法律字第11403512580號」或「11403512580」）
+        page: 頁數（每個來源各自分頁，多數每頁 20 筆；衛福部、行政院公報每頁 10 筆）
+    """
+    if page < 1:
+        return error_response("page 必須 >= 1")
+    if not (keyword.strip() or doc_number.strip() or agency.strip() or year_from or year_to):
+        return error_response("請至少提供 keyword、doc_number、agency 或年度範圍其中一項")
+    logger.info("search_agency_interpretations: keyword=%r agency=%r year=%s~%s doc_number=%r page=%d",
+                keyword, agency, year_from, year_to, doc_number, page)
+    return await interp.search(keyword, agency, year_from, year_to, doc_number, page)
+
+
+# ============================================================
+# 工具 10：取得函釋全文
+# ============================================================
+
+@mcp.tool()
+async def get_agency_interpretation(interpretation_id: str) -> dict:
+    """取得單一行政函釋全文（主旨、說明；正本、副本受文者清單省略）。
+
+    Args:
+        interpretation_id: search_agency_interpretations 回傳的 id（如「moj:FE393340」「mol:e:勞動條 3:1100130312」）
+
+    Returns:
+        agency, doc_number, date, summary, full_text, related_laws（相關法條）, notes（編註，如停止適用）,
+        attachments, source_url
+    """
+    return await interp.get(interpretation_id.strip())
+
+
+# ============================================================
+# 工具 11：搜尋判解（決議、座談、判例、司法院解釋、大法庭）
+# ============================================================
+
+@mcp.tool()
+async def search_precedents(
+    keyword: str = "",
+    category: str = "",
+    year_from: int = 0,
+    year_to: int = 0,
+    page: int = 1,
+) -> dict:
+    """搜尋司法院法學資料檢索系統的判解資料（裁判書系統 search_judgments 查不到的類別）。
+
+    類別：
+    - 決議：最高法院民刑事庭會議決議、最高行政法院聯席會議決議（108 年大法庭制度施行前）
+    - 法律問題座談：各級法院法律座談會、公證法律問題研討、懲戒法律問題座談
+    - 停止適用判例：依法院組織法第 57 條之 1 停止適用、無裁判全文可查的判例（僅存判例要旨）
+    - 司法解釋：大理院解釋、最高法院解釋、司法院院字／院解字解釋
+    - 大法庭：最高法院、最高行政法院大法庭裁定（含不同意見書附件）
+
+    引用決議、判例時請留意編註（例如「不再援用」「停止適用」）；get_precedent 會回傳編註。
+    每類每頁 20 筆，站方每類最多提供前 500 筆，筆數過多時請加關鍵字或年度縮小範圍。
+
+    Args:
+        keyword: 關鍵字（全文檢索）
+        category: 類別，可用逗號分隔多個；不填 = 全部五類
+        year_from: 起始年度（民國年）
+        year_to: 截止年度（民國年）
+        page: 頁數
+    """
+    if page < 1:
+        return error_response("page 必須 >= 1")
+    if not (keyword.strip() or year_from or year_to):
+        return error_response("請提供 keyword 或年度範圍")
+    logger.info("search_precedents: keyword=%r category=%r year=%s~%s page=%d",
+                keyword, category, year_from, year_to, page)
+    return await precedents.search(keyword.strip(), category, year_from, year_to, page)
+
+
+# ============================================================
+# 工具 12：取得判解全文
+# ============================================================
+
+@mcp.tool()
+async def get_precedent(precedent_id: str) -> dict:
+    """取得 search_precedents 結果的全文。
+
+    Args:
+        precedent_id: search_precedents 回傳的 id（如「D:A,20040316,001」「Q:A,20251119,013」「C:C,3829」）
+
+    Returns:
+        category, fields（字號、日期、決議／要旨、編註、資料來源等原站欄位）, full_text, related_laws,
+        attachments, source_url
+    """
+    return await precedents.get(precedent_id.strip())
 
 
 # ============================================================

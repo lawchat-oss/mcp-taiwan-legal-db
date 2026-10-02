@@ -7,6 +7,8 @@ A Model Context Protocol (MCP) server that gives any MCP-compatible AI assistant
 - **Judicial Yuan judgments** — judgment.judicial.gov.tw (full-text search + get)
 - **National regulation database** — law.moj.gov.tw (11,700+ laws and ordinances)
 - **Constitutional Court** — 871 Grand Justices interpretations (釋字) and Constitutional Court judgments (憲判字), with full reasoning text, served offline from a bundled cache
+- **Administrative interpretations (行政函釋)** — 11 official systems: Ministry of Justice, Labor, Health and Welfare, Finance, Economic Affairs, Interior, the Public Construction Commission and more (live)
+- **Court resolutions and precedents** — Judicial Yuan law database: Supreme Court resolutions, legal Q&A conferences, discontinued precedents, 院字 / 院解字, Grand Chamber rulings
 
 Written in Python with the [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk). Pure tool wrapper — it makes no network calls outside the official Taiwan government sources listed under [Data sources](#data-sources).
 
@@ -22,7 +24,7 @@ Taiwan's legal data is public. Open-sourcing this so nobody has to write the sam
 
 | Feature | Description |
 |---------|-------------|
-| **8 MCP tools** | Judgment search / full text, regulation queries, 釋字 / 憲判字 lookup, citation graph |
+| **12 MCP tools** | Judgment search / full text, regulation queries, 釋字 / 憲判字 lookup, citation graph, administrative interpretations, resolutions / Q&A conferences / precedents |
 | **Offline cache** | 871 Grand Justices interpretations and Constitutional Court judgments (with full reasoning text, plus Justices' opinions extracted from the official PDFs) served instantly from bundled data |
 | **Citation graph** | Extracts every 釋字 / 憲判字 cited in an interpretation's reasoning, for tracing the evolution of constitutional doctrine |
 | **Full-text search** | Keyword search over judgments + 釋字 issue / reasoning full text |
@@ -53,7 +55,7 @@ After install, the `mcp-taiwan-legal-db` entry point is on your PATH. **Wire it 
 claude mcp add taiwan-legal-db mcp-taiwan-legal-db --scope user
 ```
 
-Then `/mcp` to reload, and Claude will pick up the 8 MCP tools on natural-language queries.
+Then `/mcp` to reload, and Claude will pick up the 12 MCP tools on natural-language queries.
 
 **Chromium (Judicial Yuan WAF fallback)**: since v1.1.0 it is downloaded automatically the first time it is needed. On machines that cannot download at runtime, pre-install it:
 
@@ -80,14 +82,14 @@ python3 -m venv .venv
 # 3. Install Playwright Chromium (only invoked when the Judicial Yuan WAF triggers; idle otherwise)
 .venv/bin/playwright install chromium
 
-# 4. Verify the server starts and registers all 8 tools
+# 4. Verify the server starts and registers all 12 tools
 .venv/bin/python -c "
 import asyncio
 from mcp_server.server import mcp
 print('Server:', mcp.name)
 tools = asyncio.run(mcp.list_tools())
 print('Tools:', [t.name for t in tools])
-assert len(tools) == 8, f'Expected 8 tools, got {len(tools)}'
+assert len(tools) == 12, f'Expected 12 tools, got {len(tools)}'
 print('✓ Setup OK')
 "
 ```
@@ -95,7 +97,7 @@ print('✓ Setup OK')
 **Expected output:**
 ```
 Server: 台灣法律資料庫
-Tools: ['search_judgments', 'get_judgment', 'query_regulation', 'get_pcode', 'search_regulations', 'get_interpretation', 'search_interpretations', 'get_citations']
+Tools: ['search_judgments', 'get_judgment', 'query_regulation', 'get_pcode', 'search_regulations', 'get_interpretation', 'search_interpretations', 'get_citations', 'search_agency_interpretations', 'get_agency_interpretation', 'search_precedents', 'get_precedent']
 ✓ Setup OK
 ```
 
@@ -105,7 +107,7 @@ If that prints without errors, you're done. The repo ships a `.mcp.json` at the 
 
 ## What you get
 
-Eight MCP tools, all read-only, all hitting only public Taiwan government databases.
+Twelve MCP tools, all read-only, all hitting only public Taiwan government databases.
 
 ### Statutes and judgments
 
@@ -124,6 +126,15 @@ Eight MCP tools, all read-only, all hitting only public Taiwan government databa
 | `get_interpretation` | Full text of a Grand Justices interpretation (釋字) or Constitutional Court judgment (憲判字) — served from local cache | `get_interpretation("釋字748", reasoning_keyword="婚姻")` |
 | `search_interpretations` | Search 釋字 / 憲判字 (matches title + issue + reasoning full text) | `search_interpretations(keyword="集會自由")` |
 | `get_citations` | Citation graph: extract every 釋字 / 憲判字 cited in a given interpretation's reasoning | `get_citations("釋字748", include_context=True)` |
+
+### Administrative interpretations and court resolutions
+
+| Tool | Purpose | Typical call |
+|---|---|---|
+| `search_agency_interpretations` | Search ministries' interpretive letters and rulings (行政函釋) across 11 official systems, live | `search_agency_interpretations(keyword="加班費", agency="勞動部")` |
+| `get_agency_interpretation` | Full text of one interpretation (subject, explanation, related articles, editor's notes) | `get_agency_interpretation("moj:FE393340")` |
+| `search_precedents` | Search Supreme Court resolutions (決議), legal Q&A conferences (法律問題座談), discontinued precedents (停止適用判例), Judicial Yuan interpretations (院字/院解字) and Grand Chamber rulings (大法庭) | `search_precedents(keyword="借名登記", category="決議")` |
+| `get_precedent` | Full text of one of those, including editor's notes such as 不再援用 (no longer followed) | `get_precedent("D:A,20170214,001")` |
 
 ### Tool details
 
@@ -293,6 +304,65 @@ get_citations("釋字748", include_context=True)
 ```
 </details>
 
+<details>
+<summary><b><code>search_agency_interpretations</code> / <code>get_agency_interpretation</code></b></summary>
+
+Each ministry publishes its interpretations in its own system; there is no shared API. This tool queries the following official systems at request time, merges the hits newest-first, and keeps one copy of a letter that appears in several sources (the issuing agency's own system wins):
+
+| Source | Content |
+|---|---|
+| Ministry of Justice regulation system (mojlaw) | 行政函釋, 法規諮詢意見 |
+| Ministry of Labor regulation system | 行政函釋, 解釋令 |
+| Ministry of Health and Welfare regulation system | 行政函釋 |
+| Public Construction Commission | Government Procurement Act interpretations |
+| Ministry of Finance tax ruling system | Tax ruling compilation (法令彙編), newly issued rulings (新頒令釋) |
+| MOEA Administration of Commerce | Company Act, Business Registration Act, etc. |
+| Intellectual Property Office | Copyright interpretations |
+| MOI Department of Household Registration | Household registration, nationality, names |
+| MOI National Land Management Agency | Building administration, urban planning, housing |
+| Judicial Yuan law database (FINT) | Cross-agency interpretations (Judicial Yuan, Ministry of Justice and others) |
+| Executive Yuan Gazette | Interpretive rules issued under Administrative Procedure Act Art. 159(2)(ii) — the route for agencies without their own system, e.g. the FSC or the Ministry of Transportation |
+
+```python
+# All sources
+search_agency_interpretations(keyword="個人資料", year_from=113, year_to=114)
+
+# One or more agencies (comma-separated; short names like 金管會 / 衛福部 work)
+search_agency_interpretations(keyword="加班費", agency="勞動部")
+search_agency_interpretations(keyword="私募", agency="金管會")   # → FSC interpretive orders in the Gazette
+
+# By document number
+search_agency_interpretations(doc_number="法律字第11403512580號")
+
+# Full text (id from the search results)
+get_agency_interpretation("moj:FE393340")
+```
+
+`categories` reports each source / category's total and whether there is another page; a source that is temporarily down carries `error` while the others still return. Recipient lists (正本 / 副本) are omitted from the full text. The National Land Management Agency and the IPO only publish full dumps, so the first query downloads them to the user data directory (~16 MB and ~13 MB) and refreshes them weekly / daily.
+</details>
+
+<details>
+<summary><b><code>search_precedents</code> / <code>get_precedent</code></b></summary>
+
+Searches the parts of the Judicial Yuan law database that the judgment search (`search_judgments`) cannot reach:
+
+| Category | Content |
+|---|---|
+| 決議 | Supreme Court civil/criminal division resolutions, Supreme Administrative Court joint-meeting resolutions (before the 2019 Grand Chamber reform) |
+| 法律問題座談 | Court legal Q&A conferences, notarial and disciplinary Q&A |
+| 停止適用判例 | Precedents discontinued under Court Organization Act Art. 57-1 for lack of a full text (only the headnote survives) |
+| 司法解釋 | Daliyuan and Supreme Court interpretations, Judicial Yuan 院字 / 院解字 interpretations |
+| 大法庭 | Supreme Court and Supreme Administrative Court Grand Chamber rulings |
+
+```python
+search_precedents(keyword="借名登記")                      # all five categories
+search_precedents(keyword="情事變更", category="決議,司法解釋")
+get_precedent("D:A,20170214,001")                          # Supreme Court civil division meeting 106-3
+```
+
+Check the editor's note in `fields` (e.g. 不再援用) before citing a resolution or precedent. The site returns at most the first 500 hits per category; narrow with keywords or years when there are more.
+</details>
+
 ---
 
 ## Example prompts
@@ -304,6 +374,10 @@ get_citations("釋字748", include_context=True)
 "Which Grand Justices interpretations discuss freedom of assembly?"
 "Which earlier interpretations did Interpretation No. 748 cite?"
 "Look up 111 年憲判字第 1 號"
+"What has the Ministry of Labor ruled on overtime pay?"
+"How does the Public Construction Commission interpret withholding bid bonds?"
+"Are there Supreme Court resolutions on nominee registration (借名登記)?"
+"Look up 院解字第 3829 號"
 ```
 
 ---
@@ -436,14 +510,26 @@ This project uses a hybrid strategy:
 
 ## Data sources
 
-Live queries go to two **public** Taiwan government domains:
+Every live query goes to a **public** Taiwan government database. The server keeps no database of its own; it fetches from the official site at the moment a user asks:
 
 | Source | Domain | Used for |
 |--------|--------|----------|
 | Judicial Yuan judgment system | judgment.judicial.gov.tw | Judgment search + full text (`FJUD/Default_AD.aspx`, `data.aspx`) |
 | National regulation database | law.moj.gov.tw | Regulation articles + amendment history (`LawClass/*`) |
+| Constitutional Court | cons.judicial.gov.tw | 憲判字 published after the bundle was built (everything else is bundled offline) |
+| Judicial Yuan law database (FINT) | legal.judicial.gov.tw | Resolutions, legal Q&A conferences, discontinued precedents, Judicial Yuan interpretations, Grand Chamber, cross-agency interpretations |
+| Ministry of Justice regulation system | mojlaw.moj.gov.tw | 行政函釋, 法規諮詢意見 |
+| Ministry of Labor regulation system | laws.mol.gov.tw | 行政函釋, 解釋令 |
+| Ministry of Health and Welfare regulation system | mohwlaw.mohw.gov.tw | 行政函釋 |
+| Public Construction Commission | planpe.pcc.gov.tw | Procurement interpretations |
+| Ministry of Finance tax ruling system | ttc.mof.gov.tw | Tax rulings |
+| MOEA Administration of Commerce | gcis.nat.gov.tw | Company / commercial law interpretations |
+| Intellectual Property Office | www.tipo.gov.tw | Copyright interpretations (open data) |
+| MOI Department of Household Registration | www.ris.gov.tw | Household registration interpretations |
+| MOI National Land Management Agency | www.nlma.gov.tw | Building / planning interpretations |
+| Executive Yuan Gazette | gazette.nat.gov.tw | Ministries' interpretive rules |
 
-`mcp_server/config.py:ALLOWED_DOMAINS` enforces a hard allow-list of exactly these two domains — the server refuses any URL outside them.
+`get_judgment` accepts a user-supplied URL, and `mcp_server/config.py:ALLOWED_DOMAINS` restricts that to the judgment and regulation domains; every other tool only calls the fixed endpoints above and never takes an arbitrary URL. The Judicial Yuan law database and the Ministry of Health and Welfare system disallow crawlers in robots.txt; for those two the server only performs single, user-triggered lookups and never bulk-fetches. Interpretations, resolutions and similar documents are official documents, which Taiwan's Copyright Act Art. 9 excludes from copyright.
 
 **Judgment year coverage**: this server proxies the Judicial Yuan system live and has no database of its own, so effective coverage = whatever the Judicial Yuan holds. Measured (counting hits for keyword 「竊盜」): tens of thousands per year from ROC 89 (2000) onward, ~2,000 total for 81–88 (1992–1999), zero before 80 (1991). The Judicial Yuan states its open-data dump has "the same scope as the judgment search system", so no earlier public source exists. Expect empty or sparse results for pre-2000 queries.
 
@@ -497,7 +583,7 @@ mcp-taiwan-legal-db/
 ├── pyproject.toml         # Package metadata and deps
 └── mcp_server/
     ├── __init__.py
-    ├── server.py          # MCPServer entry — defines the 8 @mcp.tool() functions
+    ├── server.py          # MCPServer entry — defines the 12 @mcp.tool() functions
     ├── config.py          # URLs, court codes, cache TTLs, allowed domains
     ├── updater.py         # Standalone pcode_all.json refresh script
     ├── cache/db.py        # SQLite cache layer
@@ -513,7 +599,9 @@ mcp-taiwan-legal-db/
     │   ├── judicial_search.py      # search_judgments
     │   ├── judicial_doc.py         # get_judgment
     │   ├── regulations.py          # query_regulation, get_pcode, search_regulations
-    │   └── constitutional_court.py # get_interpretation, search_interpretations, get_citations
+    │   ├── constitutional_court.py # get_interpretation, search_interpretations, get_citations
+    │   ├── agency_interpretations.py # search_agency_interpretations, get_agency_interpretation
+    │   └── fint.py                 # search_precedents, get_precedent (Judicial Yuan law database)
     └── tests/             # pytest suite
 ```
 
