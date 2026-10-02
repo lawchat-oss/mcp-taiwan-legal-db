@@ -1,7 +1,7 @@
 [project]
 name = "mcp-taiwan-legal-db"
-version = "1.3.0"
-description = "MCP server for Taiwan (ROC) judicial judgments, national regulations, Constitutional Court rulings, administrative interpretations and court resolutions"
+version = "1.4.0"
+description = "MCP server for Taiwan (ROC) judicial judgments, national regulations, Constitutional Court rulings, administrative interpretations, court resolutions, appeal decisions and legislative reasons"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
@@ -29,6 +29,8 @@ dependencies = [
     "tenacity>=8.0.0",
     "playwright>=1.40.0",
     "lxml>=5.0.0",
+    # 訴願決定書、公平會處分書只有 PDF 全文
+    "pypdf>=4.0.0",
     # Use OS-native trust stores (Keychain / CryptoAPI / system ca-certs)
     # instead of the certifi bundle. Required because TWCA Global Root CA
     # in Mozilla's bundle lacks the Subject Key Identifier extension,

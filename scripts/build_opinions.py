@@ -13,7 +13,7 @@ scripts/opinion_transcripts/<網址 sha1>.txt 的人工／影像轉錄稿，並�
 沒有轉錄稿的仍只保留附件連結（chars=0）。
 
 Usage (repo root):
-    uv run --with pypdf python scripts/build_opinions.py [--cache DIR]
+    uv run python scripts/build_opinions.py [--cache DIR]
 
 頁面清單與 PDF 快取在 --cache（預設 .cache/opinions），中斷後可續跑。
 對 cons.judicial.gov.tw 首次完整執行約需數十分鐘。
@@ -24,9 +24,7 @@ import argparse
 import hashlib
 import io
 import json
-import re
 import time
-import unicodedata
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -34,46 +32,18 @@ from pathlib import Path
 import httpx
 
 from mcp_server.tools.constitutional_court import opinion_documents, page_attachments, parse_opinion_title
+from mcp_server.tools.pdf_text import clean_pdf_text, is_garbled, normalize_han
 
 DATA = Path(__file__).resolve().parent.parent / "mcp_server" / "data"
 TRANSCRIPTS = Path(__file__).resolve().parent / "opinion_transcripts"
 UA = "mcp-taiwan-legal-db data build (github.com/lawchat-oss/mcp-taiwan-legal-db)"
-CJK = "\u3000-\u303f\u4e00-\u9fff\uff00-\uffef"  # CJK punctuation, ideographs, fullwidth forms
-# 相容漢字（U+F900 起，Big5 轉出的 PDF 常見）與康熙部首（Word 轉出的 PDF 常見）外觀同一般漢字但編碼不同，
-# 不轉換會讓「法律」等關鍵字搜不到。只轉這些區段，不做整體 NFKC，以免全形標點被改成半形。
-COMPAT_HAN = re.compile("[\u2e80-\u2fdf\uf900-\ufaff\U0002f800-\U0002fa1f]")
-# 字型無法解碼時抽出的是古木基、僧伽羅、希臘等不相干文字。不用中文字比例判斷：註腳大量引日、英文法條的
-# 意見書（釋字 777 號吳陳鐶）會被誤判，正文亂碼但註腳可讀的（釋字 714 號陳新民、陳春生）又會漏判。
-EXPECTED_LETTERS = re.compile("[\x00-\u017f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uff00-\uffef]")
-MAX_GARBLED_RATIO = 0.1  # 正常文件（含 OCR 雜訊）最高約 0.015，亂碼文件最低約 0.3
-
-
-def is_garbled(text: str) -> bool:
-    odd = sum(1 for c in text if re.match("L|M|Cn", unicodedata.category(c)) and not EXPECTED_LETTERS.match(c))
-    return odd > MAX_GARBLED_RATIO * len(text)
-
-
-def clean_pdf_text(raw: str) -> str:
-    """把 PDF 排版換行接回段落：縮排開頭的行才是新段落；去掉頁碼行與中文間的多餘空白；相容漢字轉標準漢字。"""
-    paras: list[str] = []
-    for line in raw.splitlines():
-        if not line.strip() or re.fullmatch(r"\s*[-－]?\s*\d{1,3}\s*[-－]?\s*", line):
-            continue
-        if not paras or re.match("^(\\s{2,}|\u3000)", line):
-            paras.append(line.strip())
-        else:
-            paras[-1] += line.strip()
-    text = COMPAT_HAN.sub(lambda m: unicodedata.normalize("NFKC", m.group()), "\n".join(paras))
-    return re.sub(rf"(?<=[{CJK}])[ \t]+|[ \t]+(?=[{CJK}])", "", text)
-
-
 def url_hash(url: str) -> str:
     return hashlib.sha1(url.encode()).hexdigest()
 
 
 def extract_document(att: dict, pdf: bytes, cid: str) -> dict:
     """單份意見書 PDF → {title, url, text[, transcribed]}；抽不出或亂碼時改用 opinion_transcripts 的轉錄稿。"""
-    from pypdf import PdfReader  # build-time only; not a runtime dependency
+    from pypdf import PdfReader
 
     text = ""
     if pdf[:4] == b"%PDF":
@@ -87,7 +57,7 @@ def extract_document(att: dict, pdf: bytes, cid: str) -> dict:
     doc = {"title": att["title"], "url": att["url"], "text": text}
     transcript = TRANSCRIPTS / f"{url_hash(att['url'])}.txt"
     if not text and transcript.exists():
-        doc["text"] = COMPAT_HAN.sub(lambda m: unicodedata.normalize("NFKC", m.group()), transcript.read_text(encoding="utf-8").strip())
+        doc["text"] = normalize_han(transcript.read_text(encoding="utf-8").strip())
         doc["transcribed"] = True
     return doc
 

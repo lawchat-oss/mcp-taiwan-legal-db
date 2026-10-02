@@ -64,6 +64,8 @@ GAZETTE_BASE = "https://gazette.nat.gov.tw/egFront/"
 
 TIPO_XML_URL = "https://www.tipo.gov.tw/public/Data/data_output_1.xml"
 MOHW_BASE = "https://mohwlaw.mohw.gov.tw/FINT/"
+FSC_BASE = "https://law.fsc.gov.tw/"
+MOENV_BASE = "https://oaout.moenv.gov.tw/law/"
 
 # 正本、副本只是受文者清單，佔篇幅又沒有法律內容
 _RECIPIENTS = re.compile(r"\n(?:正[\s　]*本|副[\s　]*本)[\s　]*[：:].*", re.S)
@@ -348,6 +350,112 @@ async def _mohw_get(http: httpx.AsyncClient, native_id: str) -> dict:
             if l
         ] if laws else [],
         "source_url": str(r.url),
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# 金融監督管理委員會（law.fsc.gov.tw，主管法規共用系統）：解釋令、函收在「行政規則」類別
+# ─────────────────────────────────────────────────────────────
+
+async def _fsc_search(http: httpx.AsyncClient, q: Query) -> list[dict]:
+    params = {"NLawTypeID": "all", "GroupID": "2", "KW": q.keyword, "name": "1", "content": "1", "page": q.page}
+    if q.number_digits:
+        params["LNumber"] = q.number_digits
+    if q.start:
+        params["StartDate"] = q.start
+    if q.end:
+        params["EndDate"] = q.end
+    r = await http.get(FSC_BASE + "LawResult.aspx", params=params)  # GroupID 才是類別（2 = 行政規則）
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    m = re.search(r"法規類別 全部 (\d+)", soup.get_text(" ", strip=True))
+    items = []
+    for tr in soup.select("table.tab-result tr"):
+        tds = tr.find_all("td")
+        a = tds[2].select_one("a[id$=hlkLawName]") if len(tds) >= 4 else None
+        rid = re.search(r"id=(\w+)", a["href"]) if a else None
+        if rid:
+            items.append({
+                "id": f"fsc:{rid.group(1)}", "agency": "金融監督管理委員會", "category": "行政規則（含解釋令、函）",
+                "doc_number": "", "date": _date(_text(tds[1])), "summary": _text(a),
+            })
+    total = int(m.group(1)) if m else len(items)
+    return [_group("金融監督管理委員會", "行政規則（含解釋令、函）", total, items, q.page * 10 < total)]
+
+
+async def _fsc_get(http: httpx.AsyncClient, native_id: str) -> dict:
+    url = f"{FSC_BASE}LawContent.aspx?id={native_id}"
+    r = await http.get(url)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    fields = {re.sub(r"\s", "", _text(tr.th)).rstrip("："): _text(tr.td)
+              for tr in soup.select("table.tab-edit tr") if tr.th and tr.td}
+    body = soup.select_one("#ctl00_cp_content_divContent")
+    if not fields or body is None:
+        raise LookupError(native_id)
+    return {
+        "agency": "金融監督管理委員會", "doc_number": _fold(fields.get("發文字號", "")),
+        "date": _date(fields.get("公發布日", "")), "summary": fields.get("法規名稱", ""),
+        "full_text": _unwrap(body.get_text("\n")),
+        "notes": fields.get("法規體系", ""),
+        "source_url": url,
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# 環境部（oaout.moenv.gov.tw/law）：函釋在獨立的「行政函釋」子系統
+# ─────────────────────────────────────────────────────────────
+
+async def _moenv_search(http: httpx.AsyncClient, q: Query) -> list[dict]:
+    params = {"ELType": "6", "KW": q.keyword, "page": q.page}
+    if q.number_digits:
+        params["LNumber"] = q.number_digits
+    if q.start:
+        params["StartDate"] = q.start
+    if q.end:
+        params["EndDate"] = q.end
+    r = await http.get(MOENV_BASE + "ExecutiveResult.aspx", params=params)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    items = []
+    for a in soup.select("a[id$=_aLType]"):
+        rid = re.search(r"id=(\d+)", a.get("href", ""))
+        td = a.find_parent("td")
+        if not rid or td is None:
+            continue
+        kv = {
+            _text(d.select_one(".co-th")).rstrip("："): _text(d.select_one(".co-td"))
+            for d in td.find_all("div") if d.select_one(".co-th")
+        }
+        items.append({
+            "id": f"moenv:{rid.group(1)}", "agency": "環境部", "category": "行政函釋",
+            "doc_number": _fold(kv.get("發文字號", "")), "date": _date(kv.get("發文日期", "")), "summary": _text(a),
+        })
+    m = re.search(r"共\s*(\d+)\s*筆", soup.get_text())  # 只有一頁時不顯示總筆數
+    total = int(m.group(1)) if m else len(items)
+    return [_group("環境部", "行政函釋", total, items, q.page * 10 < total)]
+
+
+async def _moenv_get(http: httpx.AsyncClient, native_id: str) -> dict:
+    url = f"{MOENV_BASE}ExecutiveData.aspx?id={native_id}&type=2"  # 不帶 type=2 只回空殼
+    r = await http.get(url)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    rows = {re.sub(r"\s", "", _text(tr.th)).rstrip("："): tr.td  # 欄名有全形空白，如「內　　容」
+            for tr in soup.select("table.tab-edit tr") if tr.th and tr.td}
+    if "發文字號" not in rows:
+        raise LookupError(native_id)
+    return {
+        "agency": _text(rows.get("發文機關")) or "環境部", "doc_number": _fold(_text(rows["發文字號"])),
+        "date": _date(_text(rows.get("發文日期"))), "summary": _text(rows.get("標題")),
+        "full_text": _RECIPIENTS.sub("", _unwrap(rows["內容"].get_text("\n"))) if "內容" in rows else "",
+        "related_laws": [x for x in rows["相關法規"].get_text("\n", strip=True).split("\n") if x] if "相關法規" in rows else [],
+        "notes": _text(rows.get("單位業務分類")),
+        "attachments": [
+            {"title": _text(a), "url": str(r.url.join(a["href"]))}
+            for a in (rows["圖表附件"].select("a[href]") if "圖表附件" in rows else [])
+        ],
+        "source_url": url,
     }
 
 
@@ -912,6 +1020,8 @@ SOURCES = {
     "ris": ("內政部戶政司", ("內政部", "戶政司"), _ris_search, _ris_get),
     "nlma": ("內政部國土管理署", ("內政部", "國土管理署", "營建署"), _nlma_search, _nlma_get),
     "mohw": ("衛生福利部", ("衛生福利部", "衛福部"), _mohw_search, _mohw_get),
+    "fsc": ("金融監督管理委員會", ("金融監督管理委員會", "金管會"), _fsc_search, _fsc_get),
+    "moenv": ("環境部", ("環境部", "環保署"), _moenv_search, _moenv_get),
     "tipo": ("經濟部智慧財產局", ("經濟部", "智慧財產局", "智慧局", "著作權"), _tipo_search, _tipo_get),
     "fint": ("司法院法學資料檢索系統", ("司法院",), _fint_search, _fint_get),
     "gazette": ("行政院公報", ("行政院公報", "公報"), _gazette_search, _gazette_get),

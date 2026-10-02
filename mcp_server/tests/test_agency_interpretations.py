@@ -17,7 +17,7 @@ def _client(handler) -> httpx.AsyncClient:
 
 
 def test_unwrap_joins_fixed_width_lines_but_keeps_paragraphs():
-    raw = """主    旨：有關某某
+    raw = """主\xa0\xa0\xa0\xa0旨：有關某某
           一案。
 說    明：一、復貴院函。
           二、按行政程序法第 46 條係規
@@ -39,8 +39,9 @@ def test_date_normalizes_roc_and_gregorian(raw, iso):
 def test_resolve_sources_maps_names_and_falls_back_to_gazette():
     assert ai.resolve_sources("") == (list(ai.SOURCES), [])
     assert ai.resolve_sources("勞委會") == (["mol"], [])
-    keys, others = ai.resolve_sources("內政部,金管會")
-    assert keys == ["ris", "nlma", "gazette"] and others == ["金管會"]
+    assert ai.resolve_sources("金管會") == (["fsc"], [])
+    keys, others = ai.resolve_sources("內政部,交通部")
+    assert keys == ["ris", "nlma", "gazette"] and others == ["交通部"]
 
 
 def test_mof_stamp_handles_undated_old_letters():

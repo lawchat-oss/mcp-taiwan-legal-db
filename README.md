@@ -2,15 +2,17 @@
 
 [English](https://github.com/lawchat-oss/mcp-taiwan-legal-db/blob/main/README.en.md) · **繁體中文**
 
-台灣法規、裁判書、憲法法庭裁判、行政函釋與判解 — MCP Server。
+台灣法規、裁判書、憲法法庭裁判、行政函釋、判解、訴願決定與立法理由 — MCP Server。
 
 讓任何 MCP 相容的 AI 助手直接存取台灣公開法律資料：
 
 - **司法院裁判書** — judgment.judicial.gov.tw（全文搜尋 + 取得）
 - **全國法規資料庫** — law.moj.gov.tw（11,700+ 部法規）
 - **憲法法庭** — cons.judicial.gov.tw（871 筆大法官解釋 + 憲判字，含理由書全文，離線快取）
-- **行政機關函釋** — 法務部、勞動部、衛福部、工程會、財政部、經濟部、內政部等 11 個官方系統（即時查詢）
+- **行政機關函釋** — 法務部、勞動部、衛福部、金管會、環境部、工程會、財政部、經濟部、內政部等 13 個官方系統（即時查詢）
 - **判解** — 司法院法學資料檢索系統（最高法院決議、法律問題座談、停止適用判例、院字／院解字、大法庭）
+- **訴願決定與處分書** — 行政院訴願決定、公平會處分書（PDF 全文擷取）
+- **立法理由** — 立法院法律系統，每一條歷次修正的條文與理由
 
 以 Python 搭配 [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) 寫成。純工具 wrapper，只連線台灣政府官方來源（詳見下方「資料來源與統計」），不發送任何其他網路請求；憲法法庭資料為內建離線打包。
 
@@ -20,7 +22,7 @@
 
 | 功能 | 說明 |
 |------|------|
-| **12 個 MCP 工具** | 裁判書搜尋/全文、法規查詢、釋字/憲判字查詢、引用關係圖譜、行政函釋、決議／座談／判例 |
+| **15 個 MCP 工具** | 裁判書搜尋/全文、法規查詢、釋字/憲判字查詢、引用關係圖譜、行政函釋、決議／座談／判例、訴願決定／處分書、立法理由 |
 | **離線快取** | 871 筆大法官解釋與憲判字（含理由書全文，以及從官網 PDF 擷取的大法官意見書全文）從本地資料即時回傳 |
 | **引用關係圖譜** | 從理由書抽取所有引用的釋字/憲判字，追溯憲法學說演變 |
 | **全文搜尋** | 裁判書關鍵字搜尋 + 釋字爭點/理由書全文搜尋 |
@@ -51,7 +53,7 @@ pip install mcp-taiwan-legal-db
 claude mcp add taiwan-legal-db mcp-taiwan-legal-db --scope user
 ```
 
-接著 `/mcp` 重啟連線、Claude 就會在自然語言查詢時自動用 12 個 MCP tool。
+接著 `/mcp` 重啟連線、Claude 就會在自然語言查詢時自動用 15 個 MCP tool。
 
 **Chromium（司法院 WAF fallback）**：v1.1.0 起會在第一次需要時自動下載安裝，不用手動處理。無法連外下載的環境請預先安裝：
 
@@ -78,14 +80,14 @@ python3 -m venv .venv
 # 3. 安裝 Playwright Chromium（僅在司法院 WAF 觸發時使用，一般查詢不會啟動）
 .venv/bin/playwright install chromium
 
-# 4. 驗證伺服器可以啟動並註冊 12 個工具
+# 4. 驗證伺服器可以啟動並註冊 15 個工具
 .venv/bin/python -c "
 import asyncio
 from mcp_server.server import mcp
 print('Server:', mcp.name)
 tools = asyncio.run(mcp.list_tools())
 print('Tools:', [t.name for t in tools])
-assert len(tools) == 12, f'Expected 12 tools, got {len(tools)}'
+assert len(tools) == 15, f'Expected 15 tools, got {len(tools)}'
 print('✓ Setup OK')
 "
 ```
@@ -93,7 +95,7 @@ print('✓ Setup OK')
 **預期輸出：**
 ```
 Server: 台灣法律資料庫
-Tools: ['search_judgments', 'get_judgment', 'query_regulation', 'get_pcode', 'search_regulations', 'get_interpretation', 'search_interpretations', 'get_citations', 'search_agency_interpretations', 'get_agency_interpretation', 'search_precedents', 'get_precedent']
+Tools: ['search_judgments', 'get_judgment', 'query_regulation', 'get_pcode', 'search_regulations', 'get_interpretation', 'search_interpretations', 'get_citations', 'search_agency_interpretations', 'get_agency_interpretation', 'search_precedents', 'get_precedent', 'search_administrative_decisions', 'get_administrative_decision', 'get_legislative_history']
 ✓ Setup OK
 ```
 
@@ -103,7 +105,7 @@ Tools: ['search_judgments', 'get_judgment', 'query_regulation', 'get_pcode', 'se
 
 ## 有什麼工具可以用
 
-12 個 MCP 工具，全部唯讀，全部只打台灣政府的公開資料庫。
+15 個 MCP 工具，全部唯讀，全部只打台灣政府的公開資料庫。
 
 ### 法規與裁判
 
@@ -127,10 +129,18 @@ Tools: ['search_judgments', 'get_judgment', 'query_regulation', 'get_pcode', 'se
 
 | 工具 | 用途 | 典型呼叫 |
 |---|---|---|
-| `search_agency_interpretations` | 搜尋各部會行政函釋（11 個官方來源，即時查詢） | `search_agency_interpretations(keyword="加班費", agency="勞動部")` |
+| `search_agency_interpretations` | 搜尋各部會行政函釋（13 個官方來源，即時查詢） | `search_agency_interpretations(keyword="加班費", agency="勞動部")` |
 | `get_agency_interpretation` | 取得函釋全文（主旨、說明、相關法條、編註） | `get_agency_interpretation("moj:FE393340")` |
 | `search_precedents` | 搜尋決議、法律問題座談、停止適用判例、司法解釋（院字/院解字）、大法庭裁定 | `search_precedents(keyword="借名登記", category="決議")` |
 | `get_precedent` | 取得判解全文（含編註，例如「不再援用」） | `get_precedent("D:A,20170214,001")` |
+
+### 訴願、處分與立法理由
+
+| 工具 | 用途 | 典型呼叫 |
+|---|---|---|
+| `search_administrative_decisions` | 搜尋行政院訴願決定、公平會處分書（全文檢索） | `search_administrative_decisions(keyword="個人資料", source="訴願")` |
+| `get_administrative_decision` | 取得決定書／處分書全文（由官網 PDF 擷取） | `get_administrative_decision("ey:A-115-000633")` |
+| `get_legislative_history` | 某一條文歷次制定、修正時的條文與立法理由 | `get_legislative_history("勞動基準法", "24")` |
 
 ### 工具細節
 
@@ -282,6 +292,8 @@ get_citations("釋字748", include_context=True)
 | 法務部主管法規查詢系統 | 行政函釋、法規諮詢意見 |
 | 勞動部勞動法令查詢系統 | 行政函釋、解釋令 |
 | 衛生福利法規檢索系統 | 行政函釋 |
+| 金管會主管法規查詢系統 | 行政規則（解釋令、函收在這一類） |
+| 環境部主管法規查詢系統 | 行政函釋 |
 | 工程會政府採購法規解釋函令 | 採購法令解釋令、函 |
 | 財政部各稅法令函釋檢索系統 | 稅務法令彙編、新頒令釋 |
 | 經濟部商業發展署 商工行政法規 | 公司法、商業登記法、商業會計法、有限合夥法函釋 |
@@ -289,7 +301,7 @@ get_citations("釋字748", include_context=True)
 | 內政部戶政司 | 戶籍、國籍、姓名等法令解釋 |
 | 內政部國土管理署 | 解釋函彙編（建築管理、都市計畫、住宅） |
 | 司法院法學資料檢索系統 | 跨機關行政函釋（司法院、法務部及其他機關） |
-| 行政院公報 | 各部會依行政程序法第 159 條第 2 項第 2 款發布的解釋性規定（金管會、交通部等沒有專屬函釋系統的機關從這裡查） |
+| 行政院公報 | 各部會依行政程序法第 159 條第 2 項第 2 款發布的解釋性規定（交通部、教育部等沒有專屬函釋系統的機關從這裡查） |
 
 ```python
 # 全部來源
@@ -297,7 +309,8 @@ search_agency_interpretations(keyword="個人資料", year_from=113, year_to=114
 
 # 指定機關（可用逗號分隔多個；簡稱如「金管會」「衛福部」也可以）
 search_agency_interpretations(keyword="加班費", agency="勞動部")
-search_agency_interpretations(keyword="私募", agency="金管會")   # → 行政院公報中金管會的解釋令
+search_agency_interpretations(keyword="私募", agency="金管會")
+search_agency_interpretations(keyword="核釋", agency="交通部")   # → 行政院公報中交通部的解釋令
 
 # 用發文字號找
 search_agency_interpretations(doc_number="法律字第11403512580號")
@@ -331,6 +344,35 @@ get_precedent("D:A,20170214,001")                          # 最高法院 106 �
 引用決議、判例前請看 `fields` 裡的編註（例如「不再援用」）。站方每類最多提供前 500 筆，筆數多時請加關鍵字或年度縮小範圍。
 </details>
 
+<details>
+<summary><b><code>search_administrative_decisions</code> / <code>get_administrative_decision</code></b></summary>
+
+| 來源 | 內容 |
+|---|---|
+| 行政院訴願審議委員會 | 近 10 年的訴願決定書（PDF 全文）。108 年以前收辦的案件官網未遮蔽訴願人姓名，暫不列出 |
+| 公平交易委員會 | 處分書及不處分決議書（約 5,800 件，PDF 全文） |
+
+```python
+search_administrative_decisions(keyword="個人資料", source="訴願")
+search_administrative_decisions(doc_number="公處字第115060號")    # 依字號精確查詢
+get_administrative_decision("ey:A-115-000633")                    # 由 PDF 擷取全文
+```
+
+PDF 無法擷取文字時（多為 2008 年以前的公平會舊檔）回傳 `pdf_url` 讓使用者自行開啟。公平會把關鍵字中的空白視為詞組的一部分，多個詞請分次查。
+</details>
+
+<details>
+<summary><b><code>get_legislative_history</code></b></summary>
+
+從立法院法律系統取得某一條文每次制定、修正時的條文與**立法理由**（民國 59 年以後的修正才有理由）。適合回答「這條為什麼這樣規定」「當初修法的目的」；`query_regulation(include_history=True)` 回傳的是條文變遷，這裡多了立法理由。
+
+```python
+get_legislative_history("勞動基準法", "24")   # 73 年制定、105、107 年修正，各版條文與理由
+get_legislative_history("民法", "1030-1")     # 民法在立法院系統分編收錄，會自動對應到「民法第四編親屬」
+get_legislative_history("刑法", "339-4")      # 簡稱會轉成正式名稱「中華民國刑法」
+```
+</details>
+
 ---
 
 ## 範例問法
@@ -346,6 +388,8 @@ get_precedent("D:A,20170214,001")                          # 最高法院 106 �
 「工程會對不發還押標金有什麼解釋」
 「最高法院有沒有關於借名登記的決議」
 「查院解字第 3829 號」
+「行政院有哪些個資相關的訴願決定」
+「勞基法第 24 條當初為什麼這樣修」
 ```
 
 ---
@@ -495,9 +539,14 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 | 經濟部智慧財產局 | www.tipo.gov.tw | 著作權解釋令函（開放資料） |
 | 內政部戶政司 | www.ris.gov.tw | 戶政法令解釋 |
 | 內政部國土管理署 | www.nlma.gov.tw | 解釋函彙編 |
+| 金管會主管法規查詢系統 | law.fsc.gov.tw | 行政規則（解釋令、函） |
+| 環境部主管法規查詢系統 | oaout.moenv.gov.tw | 行政函釋 |
 | 行政院公報資訊網 | gazette.nat.gov.tw | 各部會解釋性規定 |
+| 行政院訴願審議委員會 | appeal.ey.gov.tw | 訴願決定書 |
+| 公平交易委員會 | www.ftc.gov.tw | 處分書及不處分決議書 |
+| 立法院法律系統 | lis.ly.gov.tw | 立法沿革與立法理由 |
 
-`get_judgment` 接受使用者傳入的 URL，`mcp_server/config.py:ALLOWED_DOMAINS` 以硬編碼 allow-list 限制只能是裁判書與法規兩個網域；其他工具只連上表固定網址，不接受任意 URL。司法院法學資料檢索系統與衛福部系統的 robots.txt 不允許爬蟲，本工具對這兩個來源只做使用者觸發的單次查詢，不批次抓取。函釋、決議等皆屬公文，依著作權法第 9 條不受著作權保護。
+`get_judgment` 接受使用者傳入的 URL，`mcp_server/config.py:ALLOWED_DOMAINS` 以硬編碼 allow-list 限制只能是裁判書與法規兩個網域；其他工具只連上表固定網址，不接受任意 URL。司法院法學資料檢索系統、衛福部系統與行政院訴願網站的 robots.txt 不允許爬蟲，本工具對這些來源只做使用者觸發的單次查詢，不批次抓取。函釋、決議、訴願決定、處分書等皆屬公文，依著作權法第 9 條不受著作權保護。
 
 **裁判書年份涵蓋範圍**：本工具即時代理司法院系統，沒有自己的資料庫，有效年份 = 司法院收錄範圍。實測（以「竊盜」為關鍵字計數）民國 89 年（2000）起每年數萬筆，81–88 年（1992–1999）合計約 2,000 筆，80 年（1991）以前為零。司法院公告其開放資料檔「收錄範圍與裁判書查詢系統相同」，因此沒有更早的公開來源。查詢 2000 年以前的裁判請預期查無或零星。
 
@@ -551,7 +600,7 @@ mcp-taiwan-legal-db/
 ├── pyproject.toml         # 套件 metadata 與相依
 └── mcp_server/
     ├── __init__.py
-    ├── server.py          # MCPServer 入口 — 定義 12 個 @mcp.tool() function
+    ├── server.py          # MCPServer 入口 — 定義 15 個 @mcp.tool() function
     ├── config.py          # URL、法院代碼、快取 TTL、allowed domains
     ├── updater.py         # 獨立的 pcode_all.json 更新 script
     ├── cache/db.py        # SQLite 快取層
@@ -569,7 +618,10 @@ mcp-taiwan-legal-db/
     │   ├── regulations.py          # query_regulation, get_pcode, search_regulations
     │   ├── constitutional_court.py # get_interpretation, search_interpretations, get_citations
     │   ├── agency_interpretations.py # search_agency_interpretations, get_agency_interpretation
-    │   └── fint.py                 # search_precedents, get_precedent（司法院法學資料檢索系統）
+    │   ├── fint.py                 # search_precedents, get_precedent（司法院法學資料檢索系統）
+    │   ├── admin_decisions.py      # search_administrative_decisions, get_administrative_decision
+    │   ├── legislative.py          # get_legislative_history（立法院法律系統）
+    │   └── pdf_text.py             # PDF 文字擷取（意見書、訴願決定書、處分書共用）
     └── tests/             # pytest 測試
 ```
 

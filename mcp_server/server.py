@@ -14,6 +14,8 @@ from mcp_server.tools.judicial_doc import JudgmentDocClient
 from mcp_server.tools.waf_bypass import JudicialWAFBypass
 from mcp_server.tools.agency_interpretations import AgencyInterpretationClient
 from mcp_server.tools.fint import PrecedentClient
+from mcp_server.tools.admin_decisions import AdminDecisionClient
+from mcp_server.tools.legislative import LegislativeHistoryClient
 from mcp_server.tools.constitutional_court import (
     get_interpretation as _cc_get_interpretation,
     search_interpretations as _cc_search_interpretations,
@@ -39,6 +41,8 @@ jud_doc: JudgmentDocClient | None = None
 waf: JudicialWAFBypass | None = None
 interp: AgencyInterpretationClient | None = None
 precedents: PrecedentClient | None = None
+decisions: AdminDecisionClient | None = None
+legislative: LegislativeHistoryClient | None = None
 
 
 async def _maybe_update_pcode_all():
@@ -72,7 +76,7 @@ def _log_background_task_exception(task: asyncio.Task) -> None:
 @asynccontextmanager
 async def lifespan(server: MCPServer):
     """伺服器生命週期：啟動時初始化，關閉時清理"""
-    global cache, reg_client, jud_search, jud_doc, waf, interp, precedents
+    global cache, reg_client, jud_search, jud_doc, waf, interp, precedents, decisions, legislative
 
     # 啟動
     cache = CacheDB()
@@ -86,6 +90,8 @@ async def lifespan(server: MCPServer):
     jud_doc = JudgmentDocClient(cache, waf)
     interp = AgencyInterpretationClient(cache)
     precedents = PrecedentClient(cache)
+    decisions = AdminDecisionClient(cache)
+    legislative = LegislativeHistoryClient(cache)
 
     logger.info("台灣法律資料庫 MCP Server 已啟動")
 
@@ -107,6 +113,7 @@ async def lifespan(server: MCPServer):
     await jud_doc.close()
     await interp.close()
     await precedents.close()
+    await decisions.close()
     await cache.close()
     logger.info("MCP Server 已關閉")
 
@@ -116,7 +123,7 @@ mcp = MCPServer(
     name="台灣法律資料庫",
     instructions=(
         "查詢司法院裁判書、全國法規資料庫、大法官解釋（釋字）與憲法法庭裁判（憲判字）、"
-        "各部會行政函釋，以及最高法院決議、法律問題座談、判例等判解的 MCP 工具。"
+        "各部會行政函釋、最高法院決議／法律問題座談／判例等判解、行政院訴願決定、公平會處分書與立法理由的 MCP 工具。"
         "釋字/憲判字預設層與理由書從本地快取即時回傳，無需連網。"
     ),
     lifespan=lifespan,
@@ -526,8 +533,9 @@ async def search_agency_interpretations(
 
     來源：法務部（行政函釋、法規諮詢意見）、勞動部（行政函釋、解釋令）、工程會（政府採購法令）、
     財政部（各稅法令彙編、新頒令釋）、經濟部商業發展署（公司法、商業登記法等）、經濟部智慧財產局（著作權）、
-    衛生福利部、內政部戶政司、內政部國土管理署（建築管理、都市計畫、住宅）、
-    司法院法學資料檢索系統（跨機關函釋），以及行政院公報（各部會的解釋性規定）。
+    衛生福利部、金融監督管理委員會（行政規則，含解釋令、函）、環境部、內政部戶政司、
+    內政部國土管理署（建築管理、都市計畫、住宅）、司法院法學資料檢索系統（跨機關函釋），
+    以及行政院公報（各部會的解釋性規定）。
     不指定 agency 時查全部來源；同一件函釋在多個來源出現時只保留一筆。
 
     結果依發文日期新到舊排列，每筆含 id、agency、category、doc_number（發文字號）、date、summary（要旨或主旨）。
@@ -536,12 +544,12 @@ async def search_agency_interpretations(
 
     Args:
         keyword: 關鍵字（全文檢索；多個詞以空白分隔）。查特定法條時可用「勞動基準法第24條」這類寫法
-        agency: 機關名稱，可用逗號分隔多個，例如「勞動部」「財政部,經濟部」「衛福部」「工程會」「內政部」。
-            沒有專屬系統的機關（如金管會、交通部）改查行政院公報中該機關發布的解釋性規定
+        agency: 機關名稱，可用逗號分隔多個，例如「勞動部」「財政部,經濟部」「衛福部」「金管會」「內政部」。
+            沒有專屬系統的機關（如交通部、教育部）改查行政院公報中該機關發布的解釋性規定
         year_from: 起始年度（民國年，如 110）
         year_to: 截止年度（民國年，如 114）
         doc_number: 發文字號或其號碼（如「法律字第11403512580號」或「11403512580」）
-        page: 頁數（每個來源各自分頁，多數每頁 20 筆；衛福部、行政院公報每頁 10 筆）
+        page: 頁數（每個來源各自分頁，多數每頁 20 筆；衛福部、金管會、環境部、行政院公報每頁 10 筆）
     """
     if page < 1:
         return error_response("page 必須 >= 1")
@@ -626,6 +634,83 @@ async def get_precedent(precedent_id: str) -> dict:
         attachments, source_url
     """
     return await precedents.get(precedent_id.strip())
+
+
+# ============================================================
+# 工具 13：搜尋訴願決定、公平會處分書
+# ============================================================
+
+@mcp.tool()
+async def search_administrative_decisions(
+    keyword: str = "",
+    source: str = "",
+    year_from: int = 0,
+    year_to: int = 0,
+    doc_number: str = "",
+    page: int = 1,
+) -> dict:
+    """搜尋行政院訴願決定書與公平交易委員會處分書（全文檢索，即時查詢官方網站）。
+
+    - 行政院訴願決定：近 10 年，全文為 PDF；108 年以前收辦的案件因官網未遮蔽訴願人姓名，暫不列出
+    - 公平會處分書及不處分決議書：約 5,800 件，全文為 PDF
+
+    每筆含 id、date、summary（案由）；要讀全文請把 id 傳給 get_administrative_decision。
+
+    Args:
+        keyword: 關鍵字（全文檢索）。公平會把空白視為詞組的一部分，多個詞請分次查
+        source: 「訴願」或「公平會」，不填 = 兩者
+        year_from: 起始年度（民國年）
+        year_to: 截止年度（民國年）
+        doc_number: 訴願案號（如「A-115-000633」）、院臺訴字號碼，或公平會處分書字號（如「公處字第115060號」）
+        page: 頁數（訴願每頁 20 筆、公平會每頁 10 筆）
+    """
+    if page < 1:
+        return error_response("page 必須 >= 1")
+    if not (keyword.strip() or doc_number.strip() or year_from or year_to):
+        return error_response("請至少提供 keyword、doc_number 或年度範圍其中一項")
+    logger.info("search_administrative_decisions: keyword=%r source=%r year=%s~%s doc_number=%r page=%d",
+                keyword, source, year_from, year_to, doc_number, page)
+    return await decisions.search(keyword.strip(), source, year_from, year_to, doc_number, page)
+
+
+# ============================================================
+# 工具 14：取得訴願決定、處分書全文
+# ============================================================
+
+@mcp.tool()
+async def get_administrative_decision(decision_id: str) -> dict:
+    """取得訴願決定書或公平會處分書全文（由官網 PDF 擷取文字；擷取失敗時回傳 PDF 連結）。
+
+    Args:
+        decision_id: search_administrative_decisions 回傳的 id（如「ey:A-115-000633」）
+    """
+    return await decisions.get(decision_id.strip())
+
+
+# ============================================================
+# 工具 15：立法理由
+# ============================================================
+
+@mcp.tool()
+async def get_legislative_history(law_name: str, article_no: str) -> dict:
+    """取得某一條文歷次制定、修正時的條文與立法理由（立法院法律系統，民國 59 年以後的修正才有理由）。
+
+    與 query_regulation(include_history=True) 的差別：這裡回傳立法院審議時的「理由」，
+    適合回答「這條為什麼這樣規定」「當初修法的目的」。
+
+    Args:
+        law_name: 法規名稱（如「民法」「勞動基準法」「刑法」）；簡稱會先轉成全國法規資料庫的正式名稱
+        article_no: 條號（如「184」「15-1」）
+
+    Returns:
+        law, article, versions（舊到新，每版含 date、action（制定／修正／增訂…）、text、reason）, source_url
+    """
+    name = law_name.strip()
+    if name not in ("民法", "中華民國民法"):
+        pcode = reg_client.resolve_pcode(name)
+        name = _PCODE_REVERSE.get(pcode, name) if pcode else name
+    logger.info("get_legislative_history: law=%r → %r article=%r", law_name, name, article_no)
+    return await legislative.get(name, article_no)
 
 
 # ============================================================

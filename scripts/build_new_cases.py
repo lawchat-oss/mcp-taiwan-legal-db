@@ -6,7 +6,7 @@
 抽不出文字的 PDF 要先在 scripts/opinion_transcripts/ 放轉錄稿再重跑該案（刪掉 new_cases.json 裡的那筆即可）。
 
 Usage (repo root):
-    uv run --with pypdf python scripts/build_new_cases.py
+    uv run python scripts/build_new_cases.py
 """
 from __future__ import annotations
 

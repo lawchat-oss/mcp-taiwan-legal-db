@@ -55,7 +55,7 @@ def unwrap(pre: str) -> str:
     """把固定寬度換行接回段落，壓掉排版用的連續空白。"""
     paras: list[str] = []
     for line in pre.splitlines():
-        s = re.sub(r"[ 　]{2,}", " ", line.strip())
+        s = re.sub(r"[^\S\n]{2,}", " ", line.strip())  # 含全形空白、不斷行空白（nbsp）
         if not s:
             continue
         if paras and not _PARA_START.match(s):

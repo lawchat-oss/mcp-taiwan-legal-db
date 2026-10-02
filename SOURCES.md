@@ -39,6 +39,8 @@ All data in this project is sourced from Taiwan government public databases.
 | 法務部 | https://mojlaw.moj.gov.tw | 行政函釋、法規諮詢意見 |
 | 勞動部 | https://laws.mol.gov.tw | 行政函釋、解釋令 |
 | 衛生福利部 | https://mohwlaw.mohw.gov.tw | 行政函釋（robots.txt 不允許爬蟲；僅使用者觸發的單次查詢） |
+| 金融監督管理委員會 | https://law.fsc.gov.tw | 行政規則（解釋令、函收在此類） |
+| 環境部 | https://oaout.moenv.gov.tw/law/ | 行政函釋 |
 | 行政院公共工程委員會 | https://planpe.pcc.gov.tw/prms/explainLetter/readPrmsExplainLetterSearch | 政府採購法規解釋函令 |
 | 財政部 | https://ttc.mof.gov.tw | 各稅法令函釋（法令彙編、新頒令釋） |
 | 經濟部商業發展署 | https://gcis.nat.gov.tw/elaw/ | 公司法、商業登記法、商業會計法、有限合夥法函釋 |
@@ -47,6 +49,19 @@ All data in this project is sourced from Taiwan government public databases.
 | 內政部國土管理署 | https://www.nlma.gov.tw/ch/titlelist/interpcomp | 解釋函彙編 |
 | 行政院公報資訊網 | https://gazette.nat.gov.tw | 各部會依行政程序法第 159 條第 2 項第 2 款發布之解釋性規定 |
 
+## 6. 訴願決定與處分書 / Administrative Appeal and FTC Decisions
+
+| 機關 / Agency | URL | Coverage |
+|---|---|---|
+| 行政院訴願審議委員會 | https://appeal.ey.gov.tw | 近 10 年訴願決定書（PDF）。robots.txt 不允許爬蟲；僅使用者觸發的單次查詢。108 年以前收辦案件官網未遮蔽姓名，本工具不列出 |
+| 公平交易委員會 | https://www.ftc.gov.tw/internet/main/decision/decisionList.aspx?mid=11 | 處分書及不處分決議書（PDF） |
+
+## 7. 立法院法律系統 / Legislative Yuan Law System
+
+- **URL**: https://lis.ly.gov.tw/lglawc/lglawkm
+- **Provider**: Legislative Yuan of the Republic of China (Taiwan)
+- **Coverage**: 各法律之法條沿革：歷次制定、修正之條文與立法理由（民國 59 年以後之修正附理由）
+
 ## Copyright Status
 
 上述來源的資料均依中華民國《著作權法》第 9 條第 1 項第 1 款不受著作權保護，屬公有領域：
@@ -54,7 +69,7 @@ All data in this project is sourced from Taiwan government public databases.
 - **裁判書**：法院判決屬「公文」
 - **法規**：「憲法、法律、命令」不受著作權保護
 - **大法官解釋 / 憲判字**：同屬「公文」
-- **決議、法律問題座談、判例、司法院解釋、行政函釋**：同屬「公文」
+- **決議、法律問題座談、判例、司法院解釋、行政函釋、訴願決定、處分書、立法理由**：同屬「公文」
 
 All of these sources are in the public domain under Article 9(1)(1) of the
 ROC Copyright Act, which excludes from copyright protection: constitutions,
