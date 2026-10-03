@@ -12,7 +12,7 @@ abstract: >-
   national regulations (11,700+ statutes, official English translations,
   amendment dates), 871 Constitutional Court rulings with full reasoning
   text, citation graph and case-file materials, administrative
-  interpretations and examination guidelines from 45 official systems
+  interpretations and examination guidelines from 51 official systems
   with their official validity markings, Supreme Court resolutions, legal Q&A conferences, precedents and
   curated judgments, administrative appeal and quasi-judicial decisions,
   legislative reasons, bills and gazette records, local regulations,
@@ -28,5 +28,5 @@ keywords:
   - traditional chinese
   - open data
 license: CC0-1.0
-version: 1.8.0
+version: 1.8.1
 date-released: "2026-10-04"

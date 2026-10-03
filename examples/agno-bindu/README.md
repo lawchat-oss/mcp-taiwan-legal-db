@@ -39,12 +39,16 @@ directory in sync with the upstream MCP server's tool surface.
 
 A program written against this example can ask Taiwan legal questions in
 plain Chinese or English over a standard HTTP endpoint and receive
-answers that are grounded entirely in the eight tools your MCP server
-exposes — with citations to the underlying judgments, regulations, and
+answers that are grounded entirely in the MCP server's tools — with citations to the underlying judgments, regulations, and
 constitutional interpretations. The agent is given a structured system
 prompt that requires it to call your tools rather than rely on the
 language model's training memory, and to cite each statement against the
 primary source it came from.
+
+The example's system prompt (`prompts.py`) was written for the server's
+original eight tools (judgments, regulations and constitutional
+interpretations) and lists only those; the server now exposes 26, and
+extending `<available_tools>` in `prompts.py` lets the agent use the rest.
 
 The agent uses two open-source libraries:
 
@@ -81,7 +85,7 @@ standard input and output, as defined by the Model Context Protocol.
                                                             ▼
                                               ┌─────────────────────────────┐
                                               │  mcp_server (this repo)     │
-                                              │  eight read-only tools      │
+                                              │  26 read-only tools         │
                                               └─────────────────────────────┘
                                                             │
                                                             ▼

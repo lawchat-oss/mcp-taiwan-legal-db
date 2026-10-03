@@ -8,7 +8,11 @@
 | mol | 勞動部勞動法令查詢系統 laws.mol.gov.tw | 行政函釋、解釋令 |
 | pcc | 工程會政府採購法規解釋函令 planpe.pcc.gov.tw | 採購法令解釋令、函 |
 | mof | 財政部各稅法令函釋檢索系統 ttc.mof.gov.tw | 稅務法令彙編、新頒令釋 |
+| mof_rules | 財政部主管法規查詢系統 law-out.mof.gov.tw | 部本部與關務署、國有財產署、國庫署的核釋令 |
+| customs | 財政部關務署 web.customs.gov.tw | 新頒釋函（只比對標題） |
 | gcis | 經濟部商業發展署 商工行政法規 gcis.nat.gov.tw | 公司法、商業登記法等函釋 |
+| moea | 經濟部主管法規查詢系統 law.moea.gov.tw | 本部解釋令 |
+| bsmi | 經濟部標準檢驗局 www.bsmi.gov.tw | 解釋函令（清單一天下載一次，在本機比對） |
 | ris | 內政部戶政司 www.ris.gov.tw | 戶籍、國籍、姓名等函釋 |
 | nlma | 內政部國土管理署 www.nlma.gov.tw | 建築管理、都市計畫、住宅等解釋函（整份清單下載後在本機比對） |
 | land | 內政部地政司 地政法令 www.land.moi.gov.tw/law | 地政解釋函（含已停止適用；robots.txt 全站禁止，只即時查詢） |
@@ -16,12 +20,19 @@
 | mohw | 衛生福利部 mohwlaw.mohw.gov.tw | 行政函釋 |
 | moenv | 環境部 oaout.moenv.gov.tw | 行政函釋 |
 | mocs、csptc、moex、exam | 考試院主管法規共用系統 law.exam.gov.tw | 銓敘部、保訓會、考選部、考試院行政函釋 |
-| fsc、moe、moa、moi、moc、nstc、cip、oac、ftc | 各部會主管法規共用系統（law.fsc.gov.tw、edu.law.moe.gov.tw 等） | 金管會、教育部、農業部、內政部、文化部、國科會、原民會、海委會、公平會的行政規則（含解釋令、函） |
+| dgpa | 行政院人事行政總處 law.dgpa.gov.tw | 公務員人事法令 |
+| fsc、moe、moa、moi、moc、nstc、cip、oac、ftc、mac、cec、dgbas | 各部會主管法規共用系統（law.fsc.gov.tw、edu.law.moe.gov.tw 等） | 金管會、教育部、農業部、內政部、文化部、國科會、原民會、海委會、公平會、陸委會、中選會、主計總處的行政規則（含解釋令、函） |
+| mofa、vac、nusc、ndc、hakka、ocac、sports | 同上 | 外交部、退輔會、核安會、國發會、客委會、僑委會、運動部的行政規則（多為內部要點，只在 agency 指名時查；運動部遇到驗證時用瀏覽器） |
+| mac_letters | 陸委會 www.mac.gov.tw | 大陸廣告規範專區的函與參考意見（指名才查） |
+| ncc | NCC 法規查詢系統 ncclaw.ncc.gov.tw | 行政函釋、個別函復（指名才查；遇到 Cloudflare 時用瀏覽器） |
 | motc | 交通部 motclaw.motc.gov.tw | 行政解釋（令、函、公告） |
 | cbc | 中央銀行 www.law.cbc.gov.tw | 行政令函 |
+| cpc | 行政院消費者保護處 www.ey.gov.tw | 消保法函釋（清單一天下載一次，在本機比對） |
+| sunshine | 監察院陽光法令主題網 sunshine.cy.gov.tw | 政治獻金法、利益衝突迴避法、財產申報法函釋（清單一天下載一次） |
 | tipo | 經濟部智慧財產局 www.tipo.gov.tw | 著作權解釋令函（開放資料下載後在本機比對） |
 | tipo_guide | 經濟部智慧財產局 www.tipo.gov.tw | 專利審查基準（網頁版全文）、商標審查基準（PDF）；只比對標題（見 ip_guidelines） |
 | taipei | 臺北市法規查詢系統 laws.gov.taipei | 臺北市政府解釋令函，及該系統收錄的中央機關函釋 |
+| ntpc | 新北市法規查詢系統 web.law.ntpc.gov.tw | 新北市政府與中央機關函釋（依筆數取前 5 類） |
 | fint | 司法院法學資料檢索系統 legal.judicial.gov.tw | 跨機關行政函釋（司法院、法務部等） |
 | gazette | 行政院公報 gazette.nat.gov.tw | 各部會依行政程序法第 159 條第 2 項第 2 款發布的解釋性規定 |
 

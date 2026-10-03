@@ -13,7 +13,8 @@
 
 全國法規資料庫與財政部 /download/ 的 robots.txt 不允許爬蟲；selaw 頁尾載明「本網站內容非經提供單位正式書面授權，
 不得轉載」，其結果一律附 note 提醒。所有來源只做使用者觸發的單次查詢（每次呼叫數個請求），不批次抓取、不建本機副本。
-桃園市 law.tycg.gov.tw（連線遭重設）、雲林縣（Cloudflare 驗證頁）、基隆市與宜蘭縣（憑證鏈不完整）目前無法連線，未收錄。
+雲林縣遇到 Cloudflare 驗證時改用瀏覽器（public_browser）；基隆市、宜蘭縣的伺服器沒送中繼憑證，以 tls 補上。
+分條的規範依 article_no 選條文（寫法同 query_regulation），不指定條號時只回條號範圍。
 id 一律為「來源代碼:原站識別碼」，例如 taichung:GL001385、moj_treaty:Y0040274、twse:FL007274、tpex:LW10812093。
 """
 

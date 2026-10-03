@@ -1,12 +1,13 @@
-"""立法資料：立法院議案（含審查中的草案）、立法院公報、行政院公報的法規命令草案預告
+"""立法資料：立法院議案（含審查中的草案）、立法院公報、行政院公報的法規命令草案預告、JOIN 的法律草案預告
 
 - 議案、公報：立法院議事暨公報資訊網（ppg.ly.gov.tw）前端呼叫的 JSON API，免 session。
   站方 robots.txt 不允許爬蟲：這裡只做使用者觸發的單次查詢，不批次抓取。
 - 法規命令草案預告：行政院公報（gazette.nat.gov.tw）「公告及送達」類，標題含「預告」；翻頁靠 session。
+- 法律草案預告：公共政策網路參與平臺（join.gov.tw）前端使用的公開查詢 API。
 - 立法院法律系統「立法歷程」列出的公報頁 PDF（lis.ly.gov.tw/lgcgi/lypdftxt）。
 
 紀錄 id 一律為「種類:原站識別碼」：bill:202110226160000、gazette:115/64/LCIDC01_1156401_00007、
-draft:151088、lispdf:<十六進位>。
+draft:151088、join:<UUID>、lispdf:<十六進位>。
 """
 
 from __future__ import annotations

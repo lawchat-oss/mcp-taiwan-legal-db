@@ -6,6 +6,8 @@
 
 讓任何 MCP 相容的 AI 助手直接存取台灣公開法律資料：
 
+> 本工具即時爬取官網公開資料，請求由使用者自己的電腦發出。使用前請先讀[免責聲明](#免責聲明)：使用者須自行遵守各網站的使用規定與相關法令，查詢結果不構成法律意見。
+
 - **司法院裁判書** — judgment.judicial.gov.tw（全文搜尋 + 取得，附歷審清單）
 - **全國法規資料庫** — law.moj.gov.tw（11,700+ 部法規，含官方英譯、最新公布日與施行日註記）
 - **憲法法庭** — cons.judicial.gov.tw（871 筆大法官解釋 + 憲判字，含理由書全文，離線快取；受理中案件、言詞辯論、法庭之友與卷內書狀即時查詢）
@@ -29,7 +31,7 @@
 | **離線快取** | 871 筆大法官解釋與憲判字（含理由書全文，以及從官網 PDF 擷取的大法官意見書全文）從本地資料即時回傳 |
 | **引用關係圖譜** | 從理由書抽取所有引用的釋字/憲判字（往前追溯），或列出後來引用某件的釋字/憲判字（往後追溯），追溯憲法學說演變 |
 | **全文搜尋** | 裁判書關鍵字搜尋 + 釋字爭點/理由書全文搜尋 |
-| **混合請求策略** | 預設用 httpx 直打（~0.25s），觸發司法院 F5 WAF 時自動以 Playwright 刷 cookie 後繼續 |
+| **混合請求策略** | 預設用 httpx 直打（~0.25s）；司法院 F5 WAF 或其他官網的 JavaScript 檢查擋下時，自動改用 Playwright 瀏覽器後繼續 |
 
 ---
 
@@ -798,7 +800,10 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 | 內政部消防署 | law.nfa.gov.tw | 消防法令解釋 |
 | 環境部主管法規查詢系統 | oaout.moenv.gov.tw | 行政函釋 |
 | 考試院主管法規共用系統 | law.exam.gov.tw | 銓敘部、保訓會、考選部、考試院函釋 |
-| 各部會主管法規共用系統 | law.fsc.gov.tw、edu.law.moe.gov.tw、law.moa.gov.tw、glrs.moi.gov.tw、law.moc.gov.tw、law.nstc.gov.tw、law.cip.gov.tw、law.oac.gov.tw、law.ftc.gov.tw、law.mac.gov.tw、law.cec.gov.tw、law.dgbas.gov.tw、law.mofa.gov.tw、law.vac.gov.tw、erss.nusc.gov.tw、theme.ndc.gov.tw | 金管會、教育部、農業部、內政部、文化部、國科會、原民會、海委會、公平會、陸委會、中選會、主計總處、外交部、退輔會、核安會、國發會的行政規則（解釋令、函） |
+| 各部會主管法規共用系統 | law.fsc.gov.tw、edu.law.moe.gov.tw、law.moa.gov.tw、glrs.moi.gov.tw、law.moc.gov.tw、law.nstc.gov.tw、law.cip.gov.tw、law.oac.gov.tw、law.ftc.gov.tw、law.mac.gov.tw、law.cec.gov.tw、law.dgbas.gov.tw、law.mofa.gov.tw、law.vac.gov.tw、erss.nusc.gov.tw、theme.ndc.gov.tw、law.hakka.gov.tw、law.ocac.gov.tw、law.sports.gov.tw | 金管會、教育部、農業部、內政部、文化部、國科會、原民會、海委會、公平會、陸委會、中選會、主計總處、外交部、退輔會、核安會、國發會、客委會、僑委會、運動部的行政規則（解釋令、函） |
+| NCC 法規查詢系統 | ncclaw.ncc.gov.tw | 行政函釋、個別函復 |
+| 財政部關務署 | web.customs.gov.tw | 新頒釋函 |
+| 大陸委員會 | www.mac.gov.tw | 大陸廣告規範專區的函與參考意見 |
 | 交通部法規系統 | motclaw.motc.gov.tw | 行政解釋 |
 | 中央銀行法規系統 | www.law.cbc.gov.tw | 行政令函、訴願決定 |
 | 臺北市法規查詢系統 | laws.gov.taipei | 函釋、訴願決定、地方法規 |
@@ -812,27 +817,30 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 | 金管會、銀行局、證期局、保險局 | www.fsc.gov.tw、www.banking.gov.tw、www.sfb.gov.tw、www.ib.gov.tw | 裁罰案件、金管會訴願決定 |
 | 監察院 | www.cy.gov.tw | 調查報告、糾正案、彈劾案、糾舉案 |
 | 法務部律師查詢系統 | lawyerbc.moj.gov.tw | 律師懲戒決議 |
-| 各部會訴願決定 | www.moj.gov.tw、www.mofa.gov.tw、law.mnd.gov.tw、nseweb.motc.gov.tw、www.vac.gov.tw、www.nstc.gov.tw、moda.gov.tw、law.cip.gov.tw | 法務部、外交部、國防部、交通部、退輔會、國科會、數位部、原民會訴願決定 |
-| 縣市政府訴願決定 | appeal.taichung.gov.tw、web.law.ntpc.gov.tw、law.kcg.gov.tw、www.chcg.gov.tw、glrs.hl.gov.tw、law.kinmen.gov.tw、www.miaoli.gov.tw、www.taitung.gov.tw、general.chiayi.gov.tw、www.cyhg.gov.tw、www.e-land.gov.tw、gdd.hsinchu.gov.tw | 臺中市、新北市、高雄市、彰化縣、花蓮縣、金門縣、苗栗縣、臺東縣、嘉義市、嘉義縣、宜蘭縣、新竹縣訴願決定（臺北市見上） |
+| 衛福部醫事管理系統 | ma.mohw.gov.tw | 醫事懲戒公告 |
+| 各部會訴願決定 | www.moj.gov.tw、www.mofa.gov.tw、law.mnd.gov.tw、nseweb.motc.gov.tw、www.vac.gov.tw、www.nstc.gov.tw、moda.gov.tw、law.cip.gov.tw、eportal2.moea.gov.tw、appeal.moa.gov.tw、appeal.moe.gov.tw、aamis-web.moenv.gov.tw、appealweb.mol.gov.tw、appeal.moc.gov.tw、themedata.culture.tw、aarc.moi.gov.tw、service.mohw.gov.tw、web.cec.gov.tw、www.dgpa.gov.tw | 法務部、外交部、國防部、交通部、退輔會、國科會、數位部、原民會、經濟部、農業部、教育部、環境部、勞動部、文化部、內政部、衛福部、中選會、人事總處訴願決定 |
+| 縣市政府訴願決定 | appeal.taichung.gov.tw、web.law.ntpc.gov.tw、law.kcg.gov.tw、www.chcg.gov.tw、glrs.hl.gov.tw、law.kinmen.gov.tw、www.miaoli.gov.tw、www.taitung.gov.tw、general.chiayi.gov.tw、www.cyhg.gov.tw、www.e-land.gov.tw、gdd.hsinchu.gov.tw、www.klcg.gov.tw | 臺中市、新北市、高雄市、彰化縣、花蓮縣、金門縣、苗栗縣、臺東縣、嘉義市、嘉義縣、宜蘭縣、新竹縣、基隆市訴願決定（臺北市見上） |
 | 立法院法律系統 | lis.ly.gov.tw | 立法沿革、立法理由、立法歷程與公報頁 |
 | 立法院議事暨公報資訊網 | ppg.ly.gov.tw | 議案、立法院公報 |
+| 公共政策網路參與平臺 | join.gov.tw | 法律草案預告 |
 | 法務部 法務統計資訊網 | www.rjsd.moj.gov.tw | 常用統計表 |
 | 法務部司法官學院 | www.cprc.moj.gov.tw | 《犯罪狀況及其分析》 |
 | 國家圖書館 臺灣期刊論文索引 | tpl.ncl.edu.tw | 期刊論文書目、摘要、授權全文 |
 | 政府研究資訊系統 GRB | www.grb.gov.tw、grbdef.stpi.niar.org.tw | 研究計畫書目與摘要 |
 | 中研院法律學研究所 | www.iias.sinica.edu.tw | 中研院法學期刊全文 |
 | 政治大學法學院 | review.law.nccu.edu.tw | 政大法學評論全文 |
-| 縣市法規查詢系統 | law.tycg.gov.tw、law.taichung.gov.tw、outlaw.kcg.gov.tw、law01.tainan.gov.tw、exlaw.klcg.gov.tw、hclaw.hsinchu.gov.tw、law.hccg.gov.tw、law.miaoli.gov.tw、lawsearch.chcg.gov.tw、glrs.nantou.gov.tw、law.cyhg.gov.tw、law.chiayi.gov.tw、ptlaw.pthg.gov.tw、glrslaw.e-land.gov.tw、glrs.hl.gov.tw、law.taitung.gov.tw、law.penghu.gov.tw、law.kinmen.gov.tw、law.matsu.gov.tw | 自治條例、自治規則等地方法規（臺北市、新北市見上） |
+| 臺灣大學法律學院 | www.law.ntu.edu.tw | 臺大法學論叢全文 |
+| 縣市法規查詢系統 | law.tycg.gov.tw、law.taichung.gov.tw、outlaw.kcg.gov.tw、law01.tainan.gov.tw、exlaw.klcg.gov.tw、hclaw.hsinchu.gov.tw、law.hccg.gov.tw、law.miaoli.gov.tw、lawsearch.chcg.gov.tw、glrs.nantou.gov.tw、law.cyhg.gov.tw、law.chiayi.gov.tw、ptlaw.pthg.gov.tw、glrslaw.e-land.gov.tw、glrs.hl.gov.tw、law.taitung.gov.tw、law.penghu.gov.tw、law.kinmen.gov.tw、law.matsu.gov.tw、law.yunlin.gov.tw | 自治條例、自治規則等地方法規（臺北市、新北市見上） |
 | 外交部條約協定資料庫 | no06.mofa.gov.tw | 條約協定 |
 | 財政部 | www.mof.gov.tw | 所得稅協定 |
 | 臺灣證券交易所 法規分享知識庫 | twse-regulation.twse.com.tw | 證交所規章 |
 | 證券暨期貨法令判解查詢系統 | www.selaw.com.tw | 櫃買中心、期交所規章 |
 
-本次新增來源的網址、限制與逐項實測見 [SOURCES.md](SOURCES.md) 及 [來源評估紀錄](docs/source-audit-2026-10-03.json)。
+各來源的網址、查詢方式、限制與目前未收錄的來源見 [SOURCES.md](SOURCES.md)。
 
-`get_judgment` 接受使用者傳入的 URL，`mcp_server/config.py:ALLOWED_DOMAINS` 以硬編碼 allow-list 限制只能是裁判書與法規兩個網域；其他工具只連上表固定網址，不接受任意 URL。下列網站的 robots.txt 不允許爬蟲（或排除特定路徑），本工具對它們只做使用者觸發的單次查詢，不批次抓取：司法院法學資料檢索系統（legal.judicial.gov.tw）、衛福部法規檢索系統（mohwlaw.mohw.gov.tw）、行政院訴願網站（appeal.ey.gov.tw）、立法院議事暨公報資訊網（ppg.ly.gov.tw）、內政部地政司（www.land.moi.gov.tw）、臺北市法規查詢系統的訴願決定全文路徑（laws.gov.taipei）、全國法規資料庫的條約查詢（law.moj.gov.tw）、財政部的 `/download/` 檔案（www.mof.gov.tw）。證券暨期貨法令判解查詢系統（www.selaw.com.tw）載明非經授權不得轉載，櫃買中心、期交所規章只供查閱，結果都附提醒。函釋、決議、訴願決定、處分書等皆屬公文，依著作權法第 9 條不受著作權保護；期刊論文、研究報告與交易所規章則不在此列，請依各來源的使用規定引用。國家圖書館授權的全文只供個人查閱，本工具一律不寫入快取。
+`get_judgment` 接受使用者傳入的 URL，`mcp_server/config.py:ALLOWED_DOMAINS` 以硬編碼 allow-list 限制只能是裁判書與法規兩個網域；其他工具只連上表固定網址，不接受任意 URL。下列網站的 robots.txt 不允許爬蟲（或排除特定路徑），本工具對它們只做使用者觸發的單次查詢，不批次抓取：司法院法學資料檢索系統（legal.judicial.gov.tw）、衛福部法規檢索系統（mohwlaw.mohw.gov.tw）、行政院訴願網站（appeal.ey.gov.tw）、立法院議事暨公報資訊網（ppg.ly.gov.tw）、內政部地政司（www.land.moi.gov.tw）、臺北市法規查詢系統的訴願決定全文路徑（laws.gov.taipei）、全國法規資料庫的條約查詢（law.moj.gov.tw）、財政部的 `/download/` 檔案（www.mof.gov.tw）、行政院人事行政總處網站（www.dgpa.gov.tw）。證券暨期貨法令判解查詢系統（www.selaw.com.tw）載明非經授權不得轉載，櫃買中心、期交所規章只供查閱，結果都附提醒。函釋、決議、訴願決定、處分書等皆屬公文，依著作權法第 9 條不受著作權保護；期刊論文、研究報告與交易所規章則不在此列，請依各來源的使用規定引用。國家圖書館授權的全文只供個人查閱，本工具一律不寫入快取。
 
-**個資與存取限制**：本工具只在使用者查詢時即時轉取官網公開的內容，不另外遮蔽、也不建資料庫；部分訴願決定（行政院 108 年以前收辦、法務部約 112 年以前、原民會）官網未遮蔽當事人姓名，結果照原樣呈現。本工具只查公開、免登入資料；可在新的瀏覽器工作階段中處理 JavaScript／Cloudflare 檢查及公開查詢驗證碼。每次只完成使用者指定的查詢與全文讀取，驗證失敗會回報錯誤，不當成查無資料；不登入、不使用員工或院內權限、不批次抓取。司法院量刑資訊系統只用公開頁面的彙總統計，官網只開放給院內使用者的個案判決清單一律不呼叫。
+**個資與存取限制**：本工具只在使用者查詢時即時轉取官網公開的內容，不另外遮蔽、也不建資料庫；部分訴願決定（行政院 108 年以前收辦、法務部約 112 年以前、原民會）官網未遮蔽當事人姓名，結果照原樣呈現。本工具只查公開、免登入資料；可在新的瀏覽器工作階段中處理 JavaScript／Cloudflare 檢查及公開查詢驗證碼。每次只完成使用者指定的查詢與全文讀取，驗證失敗會回報錯誤，不當成查無資料；不登入、不使用員工或院內權限、不批次抓取。司法院量刑資訊系統只用公開頁面的彙總統計，官網只開放給院內使用者的個案判決清單一律不呼叫。完整說明見[免責聲明](#免責聲明)。
 
 **裁判書年份涵蓋範圍**：本工具即時代理司法院系統，沒有自己的資料庫，有效年份 = 司法院收錄範圍。實測（以「竊盜」為關鍵字計數）民國 89 年（2000）起每年數萬筆，81–88 年（1992–1999）合計約 2,000 筆，80 年（1991）以前為零。司法院公告其開放資料檔「收錄範圍與裁判書查詢系統相同」，因此沒有更早的公開來源。查詢 2000 年以前的裁判請預期查無或零星。
 
@@ -848,7 +856,7 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 
 釋字 401 號以後與憲判字的大法官意見書，官網只以 PDF 附件公開，已擷取文字打包進 `opinions.zip`，查詢回傳的 `opinion_documents` 會列出每份意見書的標題、官網 PDF 連結與字數。其中 22 份 PDF 的字型無法解碼或頁面為圖片（主要是釋字 735–753 號的部分意見書），改以頁面影像逐字轉錄（回傳時標註 `transcribed`，引用前請核對官網 PDF）。意見書以憲法法庭網站公布的 PDF 為準；全國法規資料庫收錄的早期意見書是事後編修的版本（用字統一、修正筆誤、當事人姓名去識別化），兩者文字可能略有出入。重建方式見 `scripts/build_opinions.py`；官網公布新的憲判字後，用 `scripts/build_new_cases.py` 只補新案（含意見書）。
 
-全文工具不再按 15,000／20,000／30,000／60,000 字截斷，舊的截斷快取會重新取得。這不改變官網搜尋分頁、關鍵字片段模式、附件數量與檔案大小限制；沒有文字層的掃描檔仍提供原始連結。
+函釋、判解、決定書、文獻、統計、立法紀錄與憲法法庭文件回傳完整全文，不按字數截斷；法規與其他規範則依 `article_no` 只回傳指定的條文（一次最多 50 條），不回傳整部法規。官網搜尋分頁、關鍵字片段模式、附件數量與檔案大小限制仍在；沒有文字層的掃描檔提供原始連結。
 
 ## 快取
 
@@ -974,10 +982,18 @@ Best-effort 維護 — 我們會盡量跟上 upstream（司法院、法務部）
 
 ## 免責聲明
 
-This is an **unofficial** tool for querying publicly-available Taiwan legal databases. It is not affiliated with, endorsed by, or authorized by the Judicial Yuan, the Ministry of Justice, or any Taiwan government agency.
+**非官方工具。** 本工具與司法院、法務部或任何政府機關沒有隸屬關係，也未經其授權或背書。
 
-The data returned by this tool reflects the state of the upstream official sources at the time of query. It may be cached (see TTLs above), and **must not be treated as legal advice or a substitute for the authoritative official sources**. Always verify against the original sources before relying on the data for any legal or official purpose.
+**本工具是爬蟲。** 使用者每查詢一次，本工具就在使用者自己的電腦上向官網送出請求，擷取網頁、PDF 或網站前端使用的公開 API。部分網站的 robots.txt 不允許爬蟲；部分網站設有 JavaScript／Cloudflare 檢查或圖形驗證碼，本工具會在本機以瀏覽器（Playwright）或 OCR 完成，或使用網站提供的語音驗證功能；也有網站的驗證碼只在網頁前端檢查，本工具直接送出查詢表單。這些都只用於使用者觸發的單次查詢：不登入、不使用員工或特定使用者的權限、不批次下載文件全文。少數網站沒有搜尋功能，查詢時會下載它公開的清單，在本機比對並短期快取。除了伺服器啟動時預先連線司法院裁判書系統、每週更新一次全國法規資料庫開放資料的法規代碼表，本工具不在背景抓取資料，也不建立資料庫。
 
-本工具為**非官方**的台灣公開法規資料查詢工具，與司法院、法務部或任何台灣政府機關無隸屬關係。查詢結果以上游官方資料庫當下狀態為準（且可能被快取 — 見上方 TTL 表），**不得作為法律意見或正式用途依據**，使用前請向官方資料庫驗證。
+**使用者的責任。** 請求由使用者的電腦與網路發出。使用者須自行確認並遵守各網站的使用規定與相關法令（包括著作權法、個人資料保護法），並自行承擔使用的結果。請勿修改或使用本工具大量、高頻率或自動化地抓取資料，也不要把查詢結果建成資料庫或轉載；標示不得轉載的來源（如證基會法規系統）與國家圖書館授權全文只供個人查閱。
 
-**在本 server 之上建構的應用**：本專案是台灣公開法律來源的資料存取層。任何基於它建構的 agent、應用程式或服務（包含 [`examples/`](examples/) 內的範例），須自行負責其行為、輸出正確性與對使用者的聲明。
+**個人資料。** 部分官方文件（如訴願決定、懲戒決議）在官網公開當事人姓名，本工具照原樣回傳，不另外遮蔽。使用者處理其中的個人資料時，須符合個人資料保護法的蒐集目的與合理利用範圍。
+
+**資料正確性，不構成法律意見。** 查詢結果以官網當下的內容為準，可能因快取（見上方 TTL 表）、官網改版、擷取錯誤或掃描檔辨識錯誤而不完整或不正確。本工具與其結果不構成法律意見；正式引用或作為依據前，請向官方來源核對。
+
+**不提供擔保。** 本工具依 MIT 授權「按現狀」提供，不提供任何明示或默示的擔保。在法律許可的範圍內，維護者對使用本工具或其結果所生的損害不負賠償責任，包括資料錯誤、官網封鎖使用者的連線，以及因使用者的使用方式所生的爭議。
+
+**在本工具之上建構的服務。** 本專案的設計是在每位使用者自己的電腦上執行。若把它架設成集中式服務，或據以建構 agent、應用程式（包含 [`examples/`](examples/) 內的範例），所有對官網的請求、資料用途與對使用者的聲明，由建構者自行負責。
+
+**給網站管理者。** 若機關或網站管理者對本工具的存取方式有疑慮，或希望停止收錄、改用其他方式，請在 [GitHub Issues](https://github.com/lawchat-oss/mcp-taiwan-legal-db/issues) 提出或來信 opensource@lawchat.com.tw，我們會盡速配合調整或移除該來源。
