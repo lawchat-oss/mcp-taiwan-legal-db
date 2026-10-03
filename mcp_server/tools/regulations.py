@@ -218,6 +218,51 @@ def _article_key(no: str) -> tuple[int, int]:
     return int(base), int(sub or 0)
 
 
+MAX_ARTICLES = 50  # 一次最多回傳的條數：整部法規不該一次塞給 agent
+SPEC_HELP = "條號寫法：單條「184」「247-1」、區間「184~198」、多條「184,185,247-1」，可混用"
+OUTLINE_NOTE = "未指定條號，只回傳章節目錄與條號範圍；用 article_no 指定要讀的條文。" + SPEC_HELP
+_SPEC_SEP = re.compile(r"[,，、;；]")
+_SPEC_RANGE = re.compile(r"(.+?)[~～至到](.+)")
+
+
+def parse_article_spec(spec: str) -> list[tuple[tuple[int, int], tuple[int, int]]]:
+    """「184」「184~198」「184,185,247-1」（可混用，可帶「第」「條」）→ [(起, 迄), …]；格式不對丟 ValueError。"""
+    ranges = []
+    for part in _SPEC_SEP.split(spec):
+        part = re.sub(r"[第條\s　]", "", part)
+        if not part:
+            continue
+        m = _SPEC_RANGE.fullmatch(part)
+        lo, hi = (_article_key(m.group(1)), _article_key(m.group(2))) if m else (_article_key(part),) * 2
+        ranges.append((min(lo, hi), max(lo, hi)))
+    if not ranges:
+        raise ValueError(spec)
+    return ranges
+
+
+def article_label(key: tuple[int, int]) -> str:
+    return f"{key[0]}-{key[1]}" if key[1] else str(key[0])
+
+
+def _pick(articles: list[dict], ranges) -> tuple[list[dict], dict]:
+    """選出落在任一區間的條文（最多 MAX_ARTICLES 條），另回 has_more／note／missing（指定了卻不存在的單條）。"""
+    def key(no):
+        try:
+            return _article_key(no)
+        except ValueError:
+            return None
+    hits = [a for a in articles if (k := key(a["number"])) and any(lo <= k <= hi for lo, hi in ranges)]
+    found = {key(a["number"]) for a in hits}
+    extra = {}
+    if len(hits) > MAX_ARTICLES:
+        extra = {"has_more": True,
+                 "note": f"一次最多回傳 {MAX_ARTICLES} 條；其餘從第 {hits[MAX_ARTICLES]['number']} 條起再查"}
+    missing = [article_label(lo) for lo, hi in ranges if lo == hi and lo not in found]
+    if missing:
+        extra["missing"] = missing
+    return hits[:MAX_ARTICLES], extra
+
+
 def _article_changed_in(changes: dict[str, set[str] | None], lnndate: str, article_no: str) -> bool:
     """該版本是否可能改動目標條文；沿革查不到該日期時保守視為可能。"""
     if lnndate not in changes or changes[lnndate] is None:
@@ -403,6 +448,7 @@ class RegulationClient:
                     return error_response(
                         f"查無此條號：{law_name} 第 {article_no} 條不存在或已刪除",
                         law=cached.get("law", {"pcode": pcode, "status": _get_law_status(pcode)}),
+                        missing=[article_no],
                     )
             return {"success": True, "cached": True, **cached}
 
@@ -427,6 +473,7 @@ class RegulationClient:
                 return error_response(
                     f"查無此條號：{law_name or pcode} 第 {article_no} 條不存在或已刪除",
                     law={"pcode": pcode, "name": law_name, "status": status},
+                    missing=[article_no],
                 )
 
             data = {
@@ -454,8 +501,8 @@ class RegulationClient:
                 law={"pcode": pcode},
             )
 
-    async def get_english(self, pcode: str, article_no: str = "", from_no: str = "", to_no: str = "") -> dict:
-        """官方英譯本條文；英譯常落後中文修正，兩者日期不同時在 note 提醒。"""
+    async def get_english(self, pcode: str, ranges=None) -> dict:
+        """官方英譯本條文（ranges 來自 parse_article_spec；None = 只回條號範圍）；英譯常落後中文修正，日期不同時在 note 提醒。"""
         law = {"pcode": pcode, "name": _PCODE_REVERSE.get(pcode, ""), "status": _get_law_status(pcode)}
         row = None
         for snap in (_EN_LAWS, _EN_ORDERS):  # 法律找不到才下載命令那份
@@ -469,27 +516,30 @@ class RegulationClient:
                 break
         if row is None:
             return error_response(f"「{law['name'] or pcode}」沒有官方英譯本", law=law)
-        articles = row["articles"]
-        if article_no:
-            articles = [a for a in articles if a["number"] == _normalize_article_no(article_no)]
-        elif from_no and to_no:
-            try:
-                lo, hi = _article_key(from_no), _article_key(to_no)
-            except ValueError:
-                return error_response("條號格式應為「184」「15-1」這類寫法", law=law)
-            articles = [a for a in articles if re.fullmatch(r"\d+(-\d+)?", a["number"]) and lo <= _article_key(a["number"]) <= hi]
-        if not articles:
-            return error_response(f"英譯本查無{f'第 {article_no} 條' if article_no else '指定範圍的條文'}", law=law)
+        articles, extra = row["articles"], {}
+        if not ranges:
+            extra = {"article_count": len(articles), "first_article": articles[0]["number"] if articles else "",
+                     "last_article": articles[-1]["number"] if articles else ""}
+            articles = []
+        else:
+            articles, extra = _pick(articles, ranges)
+            if not articles:
+                return error_response("英譯本查無指定條文", law=law, **extra)
         en_date = f"{row['date'][:4]}-{row['date'][4:6]}-{row['date'][6:]}" if len(row["date"]) == 8 else row["date"]
         zh_date = _LAW_META.get(pcode, {}).get("amended", "")
         note = _EN_NOTE
         if zh_date and en_date and en_date < zh_date:
             note += f"英譯本對應 {en_date} 的版本，中文版已於 {zh_date} 修正，條文可能不一致。"
+        if not ranges:
+            note = OUTLINE_NOTE + note
+        if extra.get("note"):
+            note = extra.pop("note") + "。" + note
         return {
             "success": True, "language": "en",
             "law": {**law, "english_name": row["name"]},
             "english_version_date": en_date,
             "articles": articles,
+            **extra,
             "note": note,
             "source_url": row["url"],
         }
@@ -556,39 +606,29 @@ class RegulationClient:
                 law={"pcode": pcode},
             )
 
-    async def get_article_range(self, pcode: str, from_no: str, to_no: str) -> dict:
-        """查詢條號範圍"""
-        # 先取全文，再篩選範圍
-        all_result = await self.get_all_articles(pcode)
-        if not all_result.get("success"):
-            return all_result
+    async def get_articles(self, pcode: str, ranges) -> dict:
+        """多條、區間（ranges 來自 parse_article_spec）：取全文快取後只回傳選中的條文。"""
+        full = await self.get_all_articles(pcode)
+        if not full.get("success"):
+            return full
+        articles, extra = _pick(full.get("articles", []), ranges)
+        if not articles:
+            return error_response("查無指定條號" + (f"：{full['note']}" if full.get("note") else ""),
+                                  law=full.get("law", {"pcode": pcode}), **extra)
+        return {"success": True, "cached": full.get("cached", False), "law": full.get("law", {}),
+                "articles": articles, **extra, "source_url": full.get("source_url", "")}
 
-        # 嘗試將條號轉為可比較的數字
-        def article_sort_key(num: str) -> float:
-            # 處理 "247-1" → 247.1, "15-1" → 15.1
-            parts = num.replace("之", "-").split("-")
-            try:
-                base = float(parts[0])
-                suffix = float(parts[1]) / 10 if len(parts) > 1 else 0
-                return base + suffix
-            except (ValueError, IndexError):
-                return 0
-
-        from_key = article_sort_key(from_no)
-        to_key = article_sort_key(to_no)
-
-        filtered = [
-            a for a in all_result.get("articles", [])
-            if from_key <= article_sort_key(a["number"]) <= to_key
-        ]
-
-        return {
-            "success": True,
-            "cached": all_result.get("cached", False),
-            "law": all_result.get("law", {}),
-            "articles": filtered,
-            "source_url": all_result.get("source_url", ""),
-        }
+    async def get_outline(self, pcode: str) -> dict:
+        """沒指定條號：只回章節目錄與條號範圍，不回條文。"""
+        full = await self.get_all_articles(pcode)
+        if not full.get("success") or not full.get("articles"):
+            return full  # 連線失敗，或已廢止、官網不再提供條文（附 note）
+        articles = full["articles"]
+        return {"success": True, "cached": full.get("cached", False), "law": full.get("law", {}),
+                "article_count": len(articles), "first_article": articles[0]["number"],
+                "last_article": articles[-1]["number"], "structure": full.get("structure", []),
+                "last_amended": full.get("last_amended", ""),  # 官網頁面的修正日，law_meta.json 每週才同步
+                "note": OUTLINE_NOTE, "source_url": full.get("source_url", "")}
 
     async def _fetch_version_list(self, pcode: str) -> list[dict]:
         """抓取某法規的歷史版本清單（LawOldVerList）。

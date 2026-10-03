@@ -88,12 +88,14 @@ async def test_get_english_flags_outdated_translation(monkeypatch):
     monkeypatch.setitem(reg._LAW_META, "B0000001", {"amended": "2026-08-17"})
     client = reg.RegulationClient.__new__(reg.RegulationClient)
     client.client = None
-    r = await client.get_english("B0000001", article_no="184")
+    r = await client.get_english("B0000001", reg.parse_article_spec("184"))
     assert [a["number"] for a in r["articles"]] == ["184"]
     assert "2026-08-17" in r["note"] and r["english_version_date"] == "2021-01-20"
-    r = await client.get_english("B0000001", from_no="184", to_no="185")
+    r = await client.get_english("B0000001", reg.parse_article_spec("184~185"))
     assert len(r["articles"]) == 2
-    assert (await client.get_english("B0000001", article_no="999"))["success"] is False
+    assert (await client.get_english("B0000001", reg.parse_article_spec("999")))["success"] is False
+    r = await client.get_english("B0000001")  # 沒指定條號：不回條文
+    assert r["articles"] == [] and r["article_count"] == 2 and r["last_article"] == "185"
 
 
 def test_cited_by_scans_local_rulings(monkeypatch):

@@ -287,37 +287,39 @@ async def query_regulation(
     include_history: bool = False,
     language: str = "",
 ) -> dict:
-    """查詢全國法規資料庫的法規條文。
+    """查詢全國法規資料庫的條文：單條、區間或跨號多條，一次最多 50 條。
 
-    可查詢單一條文、條號範圍、或法規全文。回傳的 law 另含 last_amended（最新公布日）、category（主管機關分類），
+    不給條號時不回傳條文，只回傳章節目錄（structure：編章節標題與起始條號）與條號範圍，
+    再用 article_no 指定要讀的條文。回傳的 law 另含 last_amended（最新公布日）、category（主管機關分類），
     有特殊施行日時含 effective_date／effective_note（如「自公布後六個月施行」「施行日期由行政院定之」），
     引用新修正條文前應先看這兩欄確認是否已施行。
 
     Args:
         law_name: 法規名稱（如「民法」「勞動基準法」），會自動轉換為 pcode
         pcode: 法規代碼（如「B0000001」），若提供 law_name 可不填
-        article_no: 條號（如「184」「247-1」「15-1」），查詢單一條文
-        from_no: 起始條號（如「184」），查詢條號範圍時使用
-        to_no: 截止條號（如「198」），查詢條號範圍時使用
+        article_no: 單條「184」「247-1」、區間「184~198」、跨號多條「184,185,247-1」，可混用；
+            不填 = 只回目錄。超過 50 條時回傳 has_more 與續查起點，指定卻不存在的單條列在 missing
+        from_no: 起始條號，與 to_no 合用等於 article_no 的「起~迄」
+        to_no: 截止條號
         include_history: 是否包含修法沿革（使用者詢問修法歷程、修正時間、歷次修正內容時設為 True）。
-            搭配 article_no 時，會額外回傳該條文「歷次條文全文」(article_history)，
+            搭配單一條號時，會額外回傳該條文「歷次條文全文」(article_history)，
             可直接前後對比同一條在不同時間的條文細節。
         language: 「en」取官方英譯本（約 970 部法律與部分命令；英譯常落後中文修正，note 會提醒版本差異）
 
     Returns:
         包含法規條文的字典：law (pcode, name, status), articles, source_url,
         history（選填，整部法規的修法沿革文字）,
-        article_history（選填，僅在 include_history+article_no 時提供，為該條歷次條文全文）
+        article_history（選填，僅在 include_history＋單一條號時提供，為該條歷次條文全文）
     """
-    from mcp_server.tools.regulations import get_law_history
+    from mcp_server.tools.regulations import SPEC_HELP, article_label, get_law_history, parse_article_spec
 
     # 解析 pcode
     if not pcode and law_name:
         pcode = reg_client.resolve_pcode(law_name)
         if not pcode:
             return error_response(
-                f"找不到法規「{law_name}」的代碼（pcode）。"
-                f"請使用 get_pcode 工具查詢，或直接提供 pcode。",
+                f"找不到法規「{law_name}」。可用 search_regulations 以名稱中的一段查詢（如「公平交易」），"
+                f"或直接提供 pcode。",
                 law_name=law_name,
             )
 
@@ -327,16 +329,22 @@ async def query_regulation(
     logger.info("query_regulation: law_name=%r, pcode=%r, article_no=%r, range=%s~%s, history=%s, language=%r",
                 law_name, pcode, article_no, from_no, to_no, include_history, language)
 
-    if language.strip().lower() in ("en", "english", "英文"):
-        return await reg_client.get_english(pcode, article_no, from_no, to_no)
+    spec = ",".join(x for x in (article_no.strip(), f"{from_no}~{to_no}" if from_no and to_no else "") if x)
+    try:
+        ranges = parse_article_spec(spec) if spec else None
+    except ValueError:
+        return error_response(f"看不懂條號「{spec}」。{SPEC_HELP}")
+    single = article_label(ranges[0][0]) if ranges and len(ranges) == 1 and ranges[0][0] == ranges[0][1] else ""
 
-    # 查詢邏輯
-    if article_no:
-        result = await reg_client.get_article(pcode, article_no)
-    elif from_no and to_no:
-        result = await reg_client.get_article_range(pcode, from_no, to_no)
+    if language.strip().lower() in ("en", "english", "英文"):
+        return await reg_client.get_english(pcode, ranges)
+
+    if single:
+        result = await reg_client.get_article(pcode, single)
+    elif ranges:
+        result = await reg_client.get_articles(pcode, ranges)
     else:
-        result = await reg_client.get_all_articles(pcode)
+        result = await reg_client.get_outline(pcode)
 
     if result.get("success") and isinstance(result.get("law"), dict):
         result["law"].update(law_meta_fields(pcode))
@@ -349,8 +357,8 @@ async def query_regulation(
     # 查詢單一條文時，額外附上該條歷次條文全文（跨版本前後對比）。現行查無此條（例如已刪除）時
     # 歷史版本仍可能有，照樣查。不論成功與否都回傳 article_history，讓呼叫端能區分「歷史抓取失敗」
     # （available=False + reason）與「確實無歷史/無此條」。
-    if include_history and article_no:
-        result["article_history"] = await reg_client.get_article_history(pcode, article_no)
+    if include_history and single:
+        result["article_history"] = await reg_client.get_article_history(pcode, single)
 
     return result
 

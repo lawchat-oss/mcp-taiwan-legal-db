@@ -118,7 +118,7 @@ Tools: ['search_judgments', 'get_judgment', 'query_regulation', 'get_pcode', 'se
 |---|---|---|
 | `search_judgments` | 搜尋司法院裁判書資料庫 | `search_judgments(keyword="預售屋 遲延交屋", case_type="民事")` |
 | `get_judgment` | 依 JID 或 URL 取得單筆判決全文與歷審清單 | `get_judgment(jid="TPSM,114,台上,3753,20251112,1")` |
-| `query_regulation` | 查詢法規條文／範圍／全文／修法沿革／官方英譯 | `query_regulation(law_name="民法", article_no="184")` |
+| `query_regulation` | 查詢法規條文（單條、區間、跨號多條）、章節目錄、修法沿革、官方英譯 | `query_regulation(law_name="民法", article_no="184~186,247-1")` |
 | `get_pcode` | 將法規名稱解析為 pcode（法規代號） | `get_pcode(law_name="律師法")` |
 | `search_regulations` | 以關鍵字搜尋 11,700+ 部法規，或列出某日以後修正公布的法規 | `search_regulations(keyword="勞動")` |
 
@@ -224,16 +224,17 @@ get_judgment(jid="TPSM,114,台上,3753,20251112,1")
 <details>
 <summary><b><code>query_regulation</code></b></summary>
 
-查詢全國法規資料庫。
+查詢全國法規資料庫的條文：單條、區間或跨號多條，一次最多 50 條。不指定條號時不回傳條文，只回傳章節目錄（`structure`，各編章節的標題與起始條號）與條號範圍；整部法規動輒上千條，一次全給只會塞滿 agent 的 context。
 
 ```python
 # 單一條文
 query_regulation(law_name="民法", article_no="184")
 
-# 條文範圍
-query_regulation(law_name="民法", from_no="184", to_no="198")
+# 區間、跨號多條，可混用（也接受「第184條」「247之1」）
+query_regulation(law_name="民法", article_no="184~198")
+query_regulation(law_name="民法", article_no="184,185,247-1")
 
-# 完整法規
+# 不指定條號：章節目錄與條號範圍
 query_regulation(law_name="律師法")
 
 # 附修法沿革；指定條號時另回傳該條歷次條文（article_history）
@@ -249,7 +250,7 @@ query_regulation(law_name="勞動基準法", article_no="24", language="en")
 
 指定條號並開啟 `include_history` 時，`article_history.revisions` 會列出該條每次制定、增訂、修正、刪除的日期與當時條文，可直接前後對照。只讀取修法沿革中動到該條的歷史版本（例如民法第 184 條只需 36 個版本中的 5 個），版本清單與歷史版本全文都會快取；讀取失敗的版本會列在 `failed_versions` 並標 `partial`。
 
-支援 `law_name`（透過 `get_pcode` 自動解析 pcode）或直接傳 `pcode`。子條文如 `247-1`、`15-1` 都支援。
+支援 `law_name`（自動解析 pcode，縮寫如「勞基法」也可）或直接傳 `pcode`。超過 50 條時回傳 `has_more` 與續查起點；指定了卻不存在的單條列在 `missing`。`from_no`／`to_no` 等同 `article_no="起~迄"`。
 </details>
 
 <details>

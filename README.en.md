@@ -122,7 +122,7 @@ If that prints without errors, you're done. The repo ships a `.mcp.json` at the 
 |---|---|---|
 | `search_judgments` | Search Judicial Yuan judgment database | `search_judgments(case_word="台上", case_number="3753", year_from=114, court="最高法院")` |
 | `get_judgment` | Fetch full text of a single judgment by JID or URL, with its appeal history | `get_judgment(jid="TPSM,114,台上,3753,20251112,1")` |
-| `query_regulation` | Query a regulation article / range / full text / amendment history / official English translation | `query_regulation(law_name="民法", article_no="184")` |
+| `query_regulation` | Query regulation articles (single, range, or a list across the law), the chapter outline, amendment history, official English translation | `query_regulation(law_name="民法", article_no="184~186,247-1")` |
 | `get_pcode` | Resolve regulation name → pcode (law code) | `get_pcode(law_name="律師法")` → `"I0020006"` |
 | `search_regulations` | Keyword search across 11,700+ regulations, or list those amended since a date | `search_regulations(keyword="勞動")` |
 
@@ -228,16 +228,17 @@ Single judgments can be 10K+ tokens. Prefer `search_judgments` metadata first, o
 <details>
 <summary><b><code>query_regulation</code></b></summary>
 
-Queries the national regulation database.
+Queries articles in the national regulation database: a single article, a range, or a list across the law, up to 50 articles per call. Without an article number it returns no article text, only the chapter outline (`structure`: the headings of each part / chapter / section with their first article) and the article range; a whole law can run to more than a thousand articles, which would only flood the agent's context.
 
 ```python
 # Single article
 query_regulation(law_name="民法", article_no="184")
 
-# Range
-query_regulation(law_name="民法", from_no="184", to_no="198")
+# Ranges and lists, mixed freely (「第184條」 and 「247之1」 are accepted too)
+query_regulation(law_name="民法", article_no="184~198")
+query_regulation(law_name="民法", article_no="184,185,247-1")
 
-# Full law
+# No article number: chapter outline and article range
 query_regulation(law_name="律師法")
 
 # With amendment history; with an article number, also that article's past texts (article_history)
@@ -253,7 +254,7 @@ query_regulation(law_name="勞動基準法", article_no="24", language="en")
 
 With `article_no` and `include_history`, `article_history.revisions` lists each enactment, addition, amendment and deletion of that article with its date and the text at the time, for side-by-side comparison. Only the historical versions whose amendment record touches the article are fetched (Civil Code art. 184 needs 5 of 36), and the version list and version texts are cached; versions that fail to load are listed in `failed_versions` and the result is marked `partial`.
 
-Supports both `law_name` (automatic pcode resolution via `get_pcode`) and direct `pcode`. Sub-articles like `247-1`, `15-1` work.
+Supports both `law_name` (resolved automatically, abbreviations such as 勞基法 included) and direct `pcode`. Beyond 50 articles the result carries `has_more` and where to continue; requested single articles that do not exist are listed in `missing`. `from_no` / `to_no` are equivalent to `article_no="from~to"`.
 </details>
 
 <details>
