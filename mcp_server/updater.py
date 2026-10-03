@@ -14,6 +14,7 @@ import io
 import json
 import logging
 import os
+import re
 import tempfile
 import time
 import zipfile
@@ -92,6 +93,38 @@ def _fetch_and_parse(url: str, client: httpx.Client, max_retries: int = 3) -> li
     raise last_error  # type: ignore[misc]
 
 
+def _iso(yyyymmdd: str) -> str:
+    d = (yyyymmdd or "").strip()
+    return f"{d[:4]}-{d[4:6]}-{d[6:]}" if len(d) == 8 and d.isdigit() else ""
+
+
+def _law_meta(item: dict) -> dict:
+    """官方欄位：LawModifiedDate 是最新一次公布日；LawEffectiveDate 有值時是施行日（99991231 表示另定）。"""
+    meta = {
+        "amended": _iso(item.get("LawModifiedDate", "")),
+        "effective": _iso(item.get("LawEffectiveDate", "")),
+        "effective_note": re.sub(r"\s*\n\s*", "", item.get("LawEffectiveNote", "")).strip(),
+        "category": item.get("LawCategory", "").strip(),
+    }
+    return {k: v for k, v in meta.items() if v}
+
+
+def _atomic_dump(obj, path: Path) -> None:
+    """寫入 temp 檔再 os.replace（中途 crash 不損壞原檔；同一使用者可能同時跑多個程序）。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp", prefix=path.stem + "_")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False)
+        os.replace(tmp, str(path))
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def update_pcode_all(output_path: Path | None = None) -> dict:
     """從官方 API 下載所有法規，生成 pcode_all.json v2
 
@@ -103,6 +136,7 @@ def update_pcode_all(output_path: Path | None = None) -> dict:
     pcode_map: dict[str, str] = {}
     abolished_set: list[str] = []
     history_map: dict[str, str] = {}  # pcode → 修法沿革文字
+    meta_map: dict[str, dict] = {}  # pcode → 最新公布日、施行日、分類
     law_count = 0
     order_count = 0
 
@@ -123,6 +157,7 @@ def update_pcode_all(output_path: Path | None = None) -> dict:
             pcode = _extract_pcode_from_url(url)
             if not name or not pcode:
                 continue
+            meta_map[pcode] = _law_meta(item)
             pcode_map[name] = pcode
             law_count += 1
             if item.get("LawAbandonNote", "") == "廢":
@@ -140,6 +175,7 @@ def update_pcode_all(output_path: Path | None = None) -> dict:
             pcode = _extract_pcode_from_url(url)
             if not name or not pcode:
                 continue
+            meta_map[pcode] = _law_meta(item)
             pcode_map[name] = pcode
             order_count += 1
             if item.get("LawAbandonNote", "") == "廢":
@@ -171,44 +207,17 @@ def update_pcode_all(output_path: Path | None = None) -> dict:
         "abolished_set": abolished_unique,
     }
 
-    # Atomic write：寫入 temp 檔再 os.replace（中途 crash 不損壞原檔）
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_fd, tmp_path = tempfile.mkstemp(
-        dir=str(output_path.parent), suffix=".tmp", prefix="pcode_all_",
-    )
-    try:
-        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-            json.dump(result, f, ensure_ascii=False)
-        os.replace(tmp_path, str(output_path))
-    except Exception:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+    _atomic_dump(result, output_path)
 
     logger.info(
         "pcode_all.json v2 已更新: %d 部法規（法律 %d + 命令 %d，廢止 %d）",
         result["total"], law_count, order_count, result["abolished_count"],
     )
 
-    # 寫出 law_histories.json（修法沿革）
-    if history_map:
-        hist_path = output_path.parent / "law_histories.json"
-        tmp_fd2, tmp_path2 = tempfile.mkstemp(
-            dir=str(hist_path.parent), suffix=".tmp", prefix="law_histories_",
-        )
-        try:
-            with os.fdopen(tmp_fd2, "w", encoding="utf-8") as f:
-                json.dump(history_map, f, ensure_ascii=False)
-            os.replace(tmp_path2, str(hist_path))
-        except Exception:
-            try:
-                os.unlink(tmp_path2)
-            except OSError:
-                pass
-            raise
-        logger.info("law_histories.json 已更新: %d 部法規有沿革", len(history_map))
+    # 修法沿革與每部法規的最新公布日、施行日、主管機關分類，分檔寫出
+    _atomic_dump(history_map, output_path.parent / "law_histories.json")
+    _atomic_dump(meta_map, output_path.parent / "law_meta.json")
+    logger.info("law_histories.json / law_meta.json 已更新: %d / %d 部", len(history_map), len(meta_map))
 
     return result
 

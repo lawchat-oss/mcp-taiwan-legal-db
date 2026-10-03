@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 from contextlib import asynccontextmanager
 
 from mcp.server.mcpserver import MCPServer
@@ -12,7 +13,7 @@ from mcp_server.tools.regulations import RegulationClient
 from mcp_server.tools.judicial_search import JudicialSearchClient
 from mcp_server.tools.judicial_doc import JudgmentDocClient
 from mcp_server.tools.waf_bypass import JudicialWAFBypass
-from mcp_server.tools.agency_interpretations import AgencyInterpretationClient
+from mcp_server.tools.agency_interpretations import AgencyInterpretationClient, _date as parse_date
 from mcp_server.tools.fint import PrecedentClient
 from mcp_server.tools.admin_decisions import AdminDecisionClient
 from mcp_server.tools.legislative import LegislativeHistoryClient
@@ -23,6 +24,7 @@ from mcp_server.tools.constitutional_court import (
 )
 from mcp_server.tools.regulations import (
     _PCODE_ALL, _PCODE_REVERSE, _ABOLISHED_SET,
+    law_meta_fields,
     reload_pcode_all,
 )
 
@@ -153,7 +155,9 @@ async def search_judgments(
 
     【重要】查特定案號時，必須用 case_word + case_number（精確查詢），不要把案號放在 keyword。
     例如查「114年度上易字第503號」→ case_word="上易", case_number="503", year_from=114。
-    keyword 僅用於主題式全文檢索（如「預售屋 遲延交屋」）。
+    keyword 用於主題式全文檢索（如「預售屋 遲延交屋」）。
+    要找「哪些判決引用了某裁判或釋字」時才把完整字號放進 keyword（如「108年度台上大字第2680號」「釋字第748號」），
+    結果就是全文提到該字號的裁判。
 
     【資料涵蓋範圍】司法院裁判書系統自民國 89 年（2000）起才接近完整；81–88 年（1992–1999）
     僅零星收錄，80 年（1991）以前查無。查詢早於 89 年的裁判若無結果，應告知使用者是資料源
@@ -231,7 +235,9 @@ async def get_judgment(
 
     Returns:
         包含裁判書全文的字典：case_id, court, date, main_text, facts, reasoning,
-        cited_statutes, cited_cases, full_text, source_url
+        cited_statutes, cited_cases, full_text, source_url，以及 history（同一案件各審級裁判清單，
+        每筆含 desc、jid、url、pending_supreme_court）與 history_note。引用判決前應看 history：
+        後面還有上級審裁判時，要確認本判決是否已被廢棄或發回。
     """
     if not jid and not url:
         return error_response("至少需要提供 jid 或 url")
@@ -259,10 +265,13 @@ async def query_regulation(
     from_no: str = "",
     to_no: str = "",
     include_history: bool = False,
+    language: str = "",
 ) -> dict:
     """查詢全國法規資料庫的法規條文。
 
-    可查詢單一條文、條號範圍、或法規全文。
+    可查詢單一條文、條號範圍、或法規全文。回傳的 law 另含 last_amended（最新公布日）、category（主管機關分類），
+    有特殊施行日時含 effective_date／effective_note（如「自公布後六個月施行」「施行日期由行政院定之」），
+    引用新修正條文前應先看這兩欄確認是否已施行。
 
     Args:
         law_name: 法規名稱（如「民法」「勞動基準法」），會自動轉換為 pcode
@@ -273,6 +282,7 @@ async def query_regulation(
         include_history: 是否包含修法沿革（使用者詢問修法歷程、修正時間、歷次修正內容時設為 True）。
             搭配 article_no 時，會額外回傳該條文「歷次條文全文」(article_history)，
             可直接前後對比同一條在不同時間的條文細節。
+        language: 「en」取官方英譯本（約 970 部法律與部分命令；英譯常落後中文修正，note 會提醒版本差異）
 
     Returns:
         包含法規條文的字典：law (pcode, name, status), articles, source_url,
@@ -294,8 +304,11 @@ async def query_regulation(
     if not pcode:
         return error_response("須提供 law_name 或 pcode")
 
-    logger.info("query_regulation: law_name=%r, pcode=%r, article_no=%r, range=%s~%s, history=%s",
-                law_name, pcode, article_no, from_no, to_no, include_history)
+    logger.info("query_regulation: law_name=%r, pcode=%r, article_no=%r, range=%s~%s, history=%s, language=%r",
+                law_name, pcode, article_no, from_no, to_no, include_history, language)
+
+    if language.strip().lower() in ("en", "english", "英文"):
+        return await reg_client.get_english(pcode, article_no, from_no, to_no)
 
     # 查詢邏輯
     if article_no:
@@ -304,6 +317,9 @@ async def query_regulation(
         result = await reg_client.get_article_range(pcode, from_no, to_no)
     else:
         result = await reg_client.get_all_articles(pcode)
+
+    if result.get("success") and isinstance(result.get("law"), dict):
+        result["law"].update(law_meta_fields(pcode))
 
     # 附加修法沿革
     if include_history and result.get("success"):
@@ -376,40 +392,63 @@ async def get_pcode(law_name: str) -> dict:
 # ============================================================
 
 @mcp.tool()
-async def search_regulations(keyword: str, offset: int = 0, exclude_abolished: bool = False) -> dict:
-    """以關鍵字搜尋法規名稱。
+async def search_regulations(
+    keyword: str = "",
+    offset: int = 0,
+    exclude_abolished: bool = False,
+    amended_since: str = "",
+    category: str = "",
+) -> dict:
+    """以關鍵字搜尋法規名稱，或列出某日之後新制定／修正公布的法規（法遵追蹤）。
 
-    在完整法規清單（11,700+ 部）中搜尋，回傳符合的法規名稱與 pcode。
-    結果按現行法規優先排序，每頁 50 筆。
+    在完整法規清單（11,700+ 部法律與命令）中搜尋，每頁 50 筆。每筆含 law_name、pcode、status、
+    last_amended（最新公布日）、category（主管機關分類，如「行政＞勞動部＞勞動條件及就業平等目」）。
+    有 amended_since 時依公布日新到舊排列，否則現行法規優先、依名稱排列。
 
     Args:
-        keyword: 搜尋關鍵字（如「勞動」「消費」「智慧財產」）
+        keyword: 法規名稱關鍵字（如「勞動」「消費」「智慧財產」）；有 amended_since 或 category 時可省略
         offset: 分頁偏移（從第幾筆開始，預設 0）
         exclude_abolished: 排除已廢止法規（預設 False，已廢止法規仍可搜尋但標記狀態）
+        amended_since: 只列這天以後（含）公布的法規，如「2026-09-01」「115-09-01」
+        category: 主管機關或分類關鍵字（如「金融監督管理委員會」「勞動部」「稅務」），比對 category 欄
 
     Returns:
-        符合關鍵字的法規列表
+        符合條件的法規列表
     """
-    if not keyword:
-        return error_response("請提供搜尋關鍵字")
+    if not (keyword or amended_since or category):
+        return error_response("請提供 keyword、amended_since 或 category")
     if offset < 0:
         return error_response("offset 不可為負數")
+    since = ""
+    if amended_since:
+        since = parse_date(amended_since)
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", since):
+            return error_response("amended_since 格式應為「2026-09-01」或「115-09-01」")
 
-    logger.info("search_regulations: keyword=%r, offset=%d, exclude_abolished=%s",
-                keyword, offset, exclude_abolished)
+    logger.info("search_regulations: keyword=%r, offset=%d, exclude_abolished=%s, amended_since=%r, category=%r",
+                keyword, offset, exclude_abolished, amended_since, category)
     matches = []
     for name, pcode in _PCODE_ALL.items():
-        if keyword in name:
-            if exclude_abolished and pcode in _ABOLISHED_SET:
-                continue
-            matches.append({
-                "law_name": name,
-                "pcode": pcode,
-                "status": "已廢止" if pcode in _ABOLISHED_SET else "現行法規",
-            })
+        meta = law_meta_fields(pcode)
+        if keyword and keyword not in name:
+            continue
+        if exclude_abolished and pcode in _ABOLISHED_SET:
+            continue
+        if since and meta.get("last_amended", "") < since:
+            continue
+        if category and category not in meta.get("category", ""):
+            continue
+        matches.append({
+            "law_name": name,
+            "pcode": pcode,
+            "status": "已廢止" if pcode in _ABOLISHED_SET else "現行法規",
+            **{k: meta[k] for k in ("last_amended", "category") if k in meta},
+        })
 
-    # 排序：現行法規優先，再依名稱排序
-    matches.sort(key=lambda m: (m["status"] != "現行法規", m["law_name"]))
+    if since:
+        matches.sort(key=lambda m: (m.get("last_amended", ""), m["law_name"]), reverse=True)
+    else:
+        matches.sort(key=lambda m: (m["status"] != "現行法規", m["law_name"]))
 
     page_size = 50
     page = matches[offset:offset + page_size]
@@ -504,16 +543,20 @@ def search_interpretations(
 def get_citations(
     case_id: str,
     include_context: bool = False,
+    direction: str = "cites",
 ) -> dict:
-    """從大法官解釋/憲判字的理由書中抽取所有引用的其他釋字/憲判字字號。
+    """大法官解釋／憲判字之間的引用關係。
 
-    追溯方向：查詢指定裁判引用了哪些先前裁判（往前追溯）。
+    direction="cites"（預設）：從理由書抽出這件引用了哪些釋字／憲判字（往前追溯）。
+    direction="cited_by"：列出後來哪些釋字／憲判字的主文或理由書引用了這件（往後追溯）。
+    要找引用某件的法院判決，改用 search_judgments，keyword 填完整字號（如「釋字第748號」）。
 
     Args:
         case_id: 解釋/裁判字號字串（格式同 get_interpretation）
         include_context: 每個引用附上原文前後 80 字片段
+        direction: "cites" 或 "cited_by"
     """
-    return _cc_get_citations(case_id, include_context)
+    return _cc_get_citations(case_id, include_context, direction)
 
 
 # ============================================================

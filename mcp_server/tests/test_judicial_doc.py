@@ -46,12 +46,14 @@ async def test_get_by_jid_uses_cache(client, cache):
         "case_id": "104 台上 472",
         "court": "最高法院",
         "full_text": "測試用快取內容",
+        "history_key": "",  # 沒有歷審索引的頁面
     }, source="test")
 
     result = await client.get_by_jid(jid)
     assert result["success"] is True
     assert result["cached"] is True
     assert result["court"] == "最高法院"
+    assert "history_key" not in result
 
 
 @pytest.mark.asyncio

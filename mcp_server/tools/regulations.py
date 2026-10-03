@@ -1,10 +1,12 @@
 """全國法規資料庫查詢工具"""
 
 import asyncio
+import io
 import json
 import logging
 import re
 import unicodedata
+import zipfile
 from urllib.parse import quote
 
 import httpx
@@ -22,6 +24,8 @@ from mcp_server.config import (
 from mcp_server.cache.db import CacheDB
 from mcp_server.parsers.regulation_parser import parse_single_article, parse_law_all, _looks_like_article, INVALID_LAW_NAMES
 from mcp_server.tools._errors import error_response
+from mcp_server.tools.agency_interpretations import _Snapshot
+from mcp_server.updater import _extract_pcode_from_url
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +35,7 @@ _PCODE_ALL: dict[str, str] = {}
 _PCODE_REVERSE: dict[str, str] = {}  # pcode → name
 _ABOLISHED_SET: set[str] = set()  # 已廢止法規的 pcode 集合
 _LAW_HISTORIES: dict[str, str] = {}  # pcode → 修法沿革文字
+_LAW_META: dict[str, dict] = {}  # pcode → amended / effective / effective_note / category
 
 
 def _load_pcode_all():
@@ -58,21 +63,29 @@ def _load_pcode_all():
     _load_law_histories()
 
 
-def _load_law_histories():
-    """載入修法沿革資料"""
-    path = pcode_data_dir() / "law_histories.json"
+def _load_side_file(name: str) -> dict:
+    """pcode_all.json 旁的附屬資料：使用者目錄有就用，否則用套件內建版。"""
+    path = pcode_data_dir() / name
     if not path.exists():
-        path = BUNDLED_DATA_DIR / "law_histories.json"
+        path = BUNDLED_DATA_DIR / name
     try:
         with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        _LAW_HISTORIES.clear()
-        _LAW_HISTORIES.update(data)
-        logger.info("載入修法沿革: %d 部法規", len(_LAW_HISTORIES))
+            return json.load(f)
     except FileNotFoundError:
-        logger.warning("law_histories.json 不存在，修法沿革功能不可用")
+        logger.warning("%s 不存在，相關功能不可用", name)
     except Exception as e:
-        logger.error("載入 law_histories.json 失敗: %s", e)
+        logger.error("載入 %s 失敗: %s", name, e)
+    return {}
+
+
+def _load_law_histories():
+    """載入修法沿革與每部法規的公布／施行日期"""
+    for target, name in ((_LAW_HISTORIES, "law_histories.json"), (_LAW_META, "law_meta.json")):
+        data = _load_side_file(name)
+        if data:
+            target.clear()
+            target.update(data)
+    logger.info("載入修法沿革 %d 部、公布日期 %d 部", len(_LAW_HISTORIES), len(_LAW_META))
 
 
 def reload_pcode_all():
@@ -108,6 +121,17 @@ def reload_pcode_all():
 def get_law_history(pcode: str) -> str | None:
     """查詢法規修法沿革（從 law_histories.json 記憶體查）"""
     return _LAW_HISTORIES.get(pcode)
+
+
+def law_meta_fields(pcode: str) -> dict:
+    """最新公布日、施行日說明、主管機關分類（官方全量資料的欄位）。"""
+    meta = _LAW_META.get(pcode, {})
+    out = {"last_amended": meta.get("amended", ""), "category": meta.get("category", "")}
+    if meta.get("effective"):
+        out["effective_date"] = "另定（部分條文施行日期由主管機關另定）" if meta["effective"] == "9999-12-31" else meta["effective"]
+    if meta.get("effective_note"):
+        out["effective_note"] = meta["effective_note"]
+    return {k: v for k, v in out.items() if v}
 
 
 def _normalize_article_no(no: str) -> str:
@@ -267,6 +291,35 @@ _LAW_ALIASES: dict[str, str] = {
 }
 
 
+EN_LAW_URL = "https://law.moj.gov.tw/api/En/Law/JSON"
+EN_ORDER_URL = "https://law.moj.gov.tw/api/En/Order/JSON"
+_EN_NOTE = "英譯本僅供參考，法律效力以中文為準。"
+
+
+def _en_parse(blob: bytes) -> list[dict]:
+    try:
+        with zipfile.ZipFile(io.BytesIO(blob)) as z:
+            name = [n for n in z.namelist() if n.endswith(".json")][0]
+            laws = json.loads(z.read(name).decode("utf-8-sig"))["Laws"]
+    except (zipfile.BadZipFile, IndexError, KeyError) as e:  # 維護頁、格式變動
+        raise ValueError(f"英譯法規檔格式不符：{e}") from e
+    return [{
+        "id": _extract_pcode_from_url(x["EngLawURL"]),
+        "date": x.get("EngLawModifiedDate", ""),
+        "name": x.get("EngLawName", ""),
+        "url": x["EngLawURL"],
+        "articles": [
+            {"number": a.get("EngArticleNo", "").replace("Article", "").strip(" .．"), "content": a.get("EngArticleContent", "").replace("\r\n", "\n").strip()}
+            for a in x.get("EngLawArticles") or [] if a.get("EngArticleType") == "A"
+        ],
+    } for x in laws if x.get("EngLawURL")]
+
+
+# 官方英譯（法律約 970 部、命令另一份），整份下載到使用者資料目錄、每週更新
+_EN_LAWS = _Snapshot(EN_LAW_URL, "en_laws.zip", _en_parse, min_rows=500)
+_EN_ORDERS = _Snapshot(EN_ORDER_URL, "en_orders.zip", _en_parse, min_rows=500)
+
+
 class RegulationClient:
     """法規資料庫 HTTP 客戶端"""
 
@@ -400,6 +453,46 @@ class RegulationClient:
                 "連線全國法規資料庫失敗，請稍後重試",
                 law={"pcode": pcode},
             )
+
+    async def get_english(self, pcode: str, article_no: str = "", from_no: str = "", to_no: str = "") -> dict:
+        """官方英譯本條文；英譯常落後中文修正，兩者日期不同時在 note 提醒。"""
+        law = {"pcode": pcode, "name": _PCODE_REVERSE.get(pcode, ""), "status": _get_law_status(pcode)}
+        row = None
+        for snap in (_EN_LAWS, _EN_ORDERS):  # 法律找不到才下載命令那份
+            try:
+                rows = await snap.load(self.client)
+            except (httpx.HTTPError, ValueError) as e:
+                logger.warning("英譯法規下載失敗: %s", e)
+                return error_response("連線全國法規資料庫英文版失敗，請稍後重試", law=law)
+            row = next((x for x in rows if x["id"] == pcode), None)
+            if row:
+                break
+        if row is None:
+            return error_response(f"「{law['name'] or pcode}」沒有官方英譯本", law=law)
+        articles = row["articles"]
+        if article_no:
+            articles = [a for a in articles if a["number"] == _normalize_article_no(article_no)]
+        elif from_no and to_no:
+            try:
+                lo, hi = _article_key(from_no), _article_key(to_no)
+            except ValueError:
+                return error_response("條號格式應為「184」「15-1」這類寫法", law=law)
+            articles = [a for a in articles if re.fullmatch(r"\d+(-\d+)?", a["number"]) and lo <= _article_key(a["number"]) <= hi]
+        if not articles:
+            return error_response(f"英譯本查無{f'第 {article_no} 條' if article_no else '指定範圍的條文'}", law=law)
+        en_date = f"{row['date'][:4]}-{row['date'][4:6]}-{row['date'][6:]}" if len(row["date"]) == 8 else row["date"]
+        zh_date = _LAW_META.get(pcode, {}).get("amended", "")
+        note = _EN_NOTE
+        if zh_date and en_date and en_date < zh_date:
+            note += f"英譯本對應 {en_date} 的版本，中文版已於 {zh_date} 修正，條文可能不一致。"
+        return {
+            "success": True, "language": "en",
+            "law": {**law, "english_name": row["name"]},
+            "english_version_date": en_date,
+            "articles": articles,
+            "note": note,
+            "source_url": row["url"],
+        }
 
     async def get_all_articles(self, pcode: str, refresh: bool = False) -> dict:
         """查詢法規全文（所有條文）；refresh=True 略過快取重新抓取"""

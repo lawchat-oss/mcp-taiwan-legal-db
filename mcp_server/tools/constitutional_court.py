@@ -141,8 +141,25 @@ _OLD_NUM_RE = re.compile(r"(?:釋字|解釋)[^\d]*(\d+)")
 _PURE_NUM_RE = re.compile(r"^\s*(\d+)\s*$")
 
 # Citation extraction — used by get_citations()
-_CITATION_OLD_RE = re.compile(r"釋字第\s*(\d+)\s*號")
-_CITATION_NEW_RE = re.compile(r"(\d{3,4})\s*年\s*憲判字第\s*(\d+)\s*號")
+# 並列引用常省略前綴：「釋字第477號、第747號及第762號」「112年憲判字第4號、第11號」
+_CITATION_TAIL = r"((?:\s*[、及與和暨，,]\s*第\s*\d+\s*號)*)"
+_CITATION_OLD_RE = re.compile(r"釋字第\s*(\d+)\s*號" + _CITATION_TAIL)
+_CITATION_NEW_RE = re.compile(r"(\d{3,4})\s*年\s*憲判字第\s*(\d+)\s*號" + _CITATION_TAIL)
+_CITATION_TAIL_NUM = re.compile(r"第\s*(\d+)\s*號")
+
+
+def _citation_hits(text: str) -> list[tuple[dict, int, int]]:
+    """全文中的每一個釋字／憲判字引用：(entry, 該串引用起點, 終點)。"""
+    hits = []
+    for m in _CITATION_OLD_RE.finditer(text):
+        for n in [m.group(1), *_CITATION_TAIL_NUM.findall(m.group(2))]:
+            hits.append(({"type": "釋字", "case_id": f"釋字第{int(n)}號", "number": int(n)}, m.start(), m.end()))
+    for m in _CITATION_NEW_RE.finditer(text):
+        y = int(m.group(1))
+        for n in [m.group(2), *_CITATION_TAIL_NUM.findall(m.group(3))]:
+            hits.append(({"type": "憲判字", "case_id": f"{y}年憲判字第{int(n)}號", "year": y, "number": int(n)},
+                         m.start(), m.end()))
+    return hits
 
 
 def _parse_case_id(case_id: str) -> tuple[str, int, int]:
@@ -531,28 +548,8 @@ def _extract_citations(text: str) -> list[dict]:
         {"type": "釋字",   "case_id": "釋字第N號",     "number": N}
         {"type": "憲判字", "case_id": "Y年憲判字第N號", "year": Y, "number": N}
     """
-    seen: set[str] = set()
-    old_cits: list[dict] = []
-    new_cits: list[dict] = []
-
-    for m in _CITATION_OLD_RE.finditer(text):
-        n = int(m.group(1))
-        cid = f"釋字第{n}號"
-        if cid not in seen:
-            seen.add(cid)
-            old_cits.append({"type": "釋字", "case_id": cid, "number": n})
-
-    for m in _CITATION_NEW_RE.finditer(text):
-        y, n = int(m.group(1)), int(m.group(2))
-        cid = f"{y}年憲判字第{n}號"
-        if cid not in seen:
-            seen.add(cid)
-            new_cits.append({"type": "憲判字", "case_id": cid, "year": y, "number": n})
-
-    return (
-        sorted(old_cits, key=lambda x: x["number"])
-        + sorted(new_cits, key=lambda x: (x["year"], x["number"]))
-    )
+    unique = {e["case_id"]: e for e, _, _ in _citation_hits(text)}
+    return sorted(unique.values(), key=lambda x: (x["type"] != "釋字", x.get("year", 0), x["number"]))
 
 
 def _get_reasoning_text(
@@ -964,9 +961,37 @@ def _get_new_ruling(
     return result
 
 
+def _cited_by(system: str, number: int, year: int, include_context: bool) -> list[dict]:
+    """本地收錄的釋字／憲判字中，主文或理由書提到目標字號的案件（不含意見書）。"""
+    target = f"釋字第{number}號" if system == "釋字" else f"{year}年憲判字第{number}號"
+    cases = [
+        ({"type": "釋字", "case_id": f"釋字第{k}號", "number": int(k)}, v) for k, v in _load_old_cases().items()
+    ] + [
+        ({"type": "憲判字", "case_id": f"{k.split('_')[0]}年憲判字第{k.split('_')[1]}號",
+          "year": int(k.split("_")[0]), "number": int(k.split("_")[1])}, v)
+        for k, v in _load_new_cases().items()
+    ]
+    out = []
+    for entry, case in cases:
+        if entry["case_id"] == target:
+            continue
+        text = f"{case.get('main_text') or ''}\n{case.get('reasoning') or ''}"
+        spans = [(a, b) for e, a, b in _citation_hits(text) if e["case_id"] == target]
+        if not spans:
+            continue
+        entry = {**entry, "date": case.get("date", "")}
+        if include_context:
+            entry["context_snippets"] = [
+                ("..." if a > 80 else "") + text[max(0, a - 80): b + 80] + "..." for a, b in spans
+            ]
+        out.append(entry)
+    return sorted(out, key=lambda x: (x["type"] != "釋字", x.get("year", 0), x["number"]))
+
+
 def get_citations(
     case_id: str,
     include_context: bool = False,
+    direction: str = "cites",
 ) -> dict:
     """從裁判理由書中抽取所有引用的大法官解釋 / 憲判字字號。
 
@@ -976,14 +1001,15 @@ def get_citations(
     ⚠️ 限制：
     - 若理由書超過 15000 字被安全閥截斷，截斷後段落中的引用會遺漏；
       此時 `reasoning_truncated=True` 提醒清單可能不完整。
-    - 非標準格式目前不匹配，例如：
-      「第 748 號解釋」（前面沒有「釋字」）
-      「釋字第 A 號、第 B 號、第 C 號」（B 和 C 沒有「釋字第」前綴）
+    - 非標準格式目前不匹配，例如「第 748 號解釋」（前面沒有「釋字」）。
+      並列的「釋字第 A 號、第 B 號及第 C 號」會一併收錄。
     - 早期大法官解釋中以中文數字書寫字號的案件（如「釋字第八十五號」）不匹配。
 
     Args:
         case_id: 解釋/裁判字號字串（格式同 get_interpretation）
         include_context: 若為 True，每個引用項目附上原文中前後 80 字的片段
+        direction: "cites"（預設）＝這件引用了哪些；"cited_by"＝後來哪些釋字／憲判字的主文或理由書引用了這件
+            （比對本地收錄的全部案件，不含意見書與資料包建置後才公布的新案）
 
     Returns:
         success=True:
@@ -996,6 +1022,18 @@ def get_citations(
     except ValueError as e:
         return error_response(str(e), case_id=case_id)
 
+    if direction == "cited_by":
+        cited_by = _cited_by(system, number, year, include_context)
+        return {
+            "success": True,
+            "source_case_id": f"釋字第{number}號" if system == "釋字" else f"{year}年憲判字第{number}號",
+            "cited_by": cited_by,
+            "cited_by_count": len(cited_by),
+            "note": "要找引用這件的法院判決，用 search_judgments(keyword=\"釋字第N號\") 這類完整字號全文檢索。",
+        }
+    if direction != "cites":
+        return error_response("direction 只能是 cites 或 cited_by", case_id=case_id)
+
     text, truncated, err = _get_reasoning_text(system, number, year)
     if err is not None:
         return err
@@ -1007,24 +1045,14 @@ def get_citations(
     citations = _extract_citations(text)
 
     if include_context and text:
+        spans: dict[str, list[tuple[int, int]]] = {}
+        for e, a, b in _citation_hits(text):
+            spans.setdefault(e["case_id"], []).append((a, b))
         for entry in citations:
-            if entry["type"] == "釋字":
-                pattern = re.compile(rf"釋字第\s*{entry['number']}\s*號")
-            else:
-                pattern = re.compile(
-                    rf"{entry['year']}\s*年\s*憲判字第\s*{entry['number']}\s*號"
-                )
-            snippets = []
-            for m in pattern.finditer(text):
-                start = max(0, m.start() - 80)
-                end = min(len(text), m.end() + 80)
-                snippet = (
-                    ("..." if start > 0 else "")
-                    + text[start:end]
-                    + ("..." if end < len(text) else "")
-                )
-                snippets.append(snippet)
-            entry["context_snippets"] = snippets
+            entry["context_snippets"] = [
+                ("..." if a > 80 else "") + text[max(0, a - 80): b + 80] + ("..." if b + 80 < len(text) else "")
+                for a, b in spans.get(entry["case_id"], [])
+            ]
 
     result: dict = {
         "success": True,
