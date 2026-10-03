@@ -7,11 +7,11 @@ MCP tool 註冊在 server.py，本模組只匯出核心函式。
 - 舊制：釋字第 1 號 - 第 813 號（民國 38-110 年）
 - 新制：111 年起憲判字（憲法訴訟法新制）
 
-設計哲學（v0.3.0）：
+回傳方式：
 1. 預設層精簡：僅回「結論與拘束力來源」欄位（字號/日期/爭點/解釋文/相關法令），
-   絕不截斷、絕不超過數千字。
+   完整保留該欄位。
 2. 長文 opt-in：理由書與意見書必須 LLM 明確要求才回傳，避免 context 爆炸。
-3. 硬安全閥：僅在極端大案觸發（15000 字），觸發時大聲告知 LLM 不得斷言「未提及」。
+3. 全文模式不按字數截斷；關鍵字模式仍回傳命中片段。
 4. 字號防碰撞：統一用 case_id 字串介面，後端 regex 解析。
 """
 
@@ -39,9 +39,6 @@ from mcp_server.tools._errors import error_response
 
 BASE = "https://cons.judicial.gov.tw"
 TIMEOUT = 15.0
-
-# 硬安全閥：任何 LLM 曝光的長文欄位最終上限。僅在極端大案觸發。
-HARD_SAFETY_VALVE = 15000
 
 # Keyword mode snippet 設定
 SNIPPET_CONTEXT = 200          # 每個 match 前後各取 200 字
@@ -410,24 +407,6 @@ def _extract_snippets(
     return snippets, total
 
 
-def _apply_safety_valve(text: str, next_step: Optional[str] = None) -> tuple[str, bool]:
-    """長文硬安全閥。僅在極端大案觸發（預設 15000 字）。
-
-    觸發時在尾端注入明確的 system warning，要求 LLM 不得斷言「未提及」；next_step 告訴 LLM 如何取得後段。
-    """
-    if not text or len(text) <= HARD_SAFETY_VALVE:
-        return text, False
-    original = len(text)
-    cut = original - HARD_SAFETY_VALVE
-    warning = (
-        f"\n\n[System Warning: 本欄位字數過長（原長 {original} 字），"
-        f"已截斷末端 {cut} 字。請優先基於已提供的部分進行推理，"
-        f"切勿直接斷言「大法官並未提及某事」——被截斷的內容可能包含關鍵論述。"
-        f"{next_step or '若判斷末端內容關鍵，可回報使用者需人工查閱完整判決。'}]"
-    )
-    return text[:HARD_SAFETY_VALVE] + warning, True
-
-
 def _load_old_cases() -> dict[str, dict]:
     """讀取 data/old_cases.json（舊制釋字完整預設層快取），lazy-load 一次。"""
     global _old_cases
@@ -514,7 +493,7 @@ def _attach_opinions(
 ) -> None:
     """快取路徑的意見書：PDF 擷取全文優先，其次 case JSON 內的 HTML 意見書；並附上附件清單。
 
-    document 非空時只取標題含該字串的意見書（例如大法官姓名），讓單份長文不被其他意見書擠出安全閥。
+    document 非空時只取標題含該字串的意見書（例如大法官姓名），完整回傳該份文字。
     """
     document = (document or "").strip()
     if not (include_full or keyword or document):
@@ -555,22 +534,20 @@ def _extract_citations(text: str) -> list[dict]:
 def _get_reasoning_text(
     system: str, number: int, year: int
 ) -> tuple[str, bool, Optional[dict]]:
-    """取得裁判理由書全文。優先讀本地快取（不截斷），再 live fetch（截斷 15000）。
+    """取得裁判理由書全文。優先讀本地快取，再 live fetch；不按字數截斷。
     回傳 (text, truncated, error_dict_or_None)。
     """
     if system == "釋字":
         cached = _load_old_cases().get(str(number))
         if cached and "reasoning" in cached:
             text = cached["reasoning"]
-            truncated = len(text) > HARD_SAFETY_VALVE
-            return (text[:HARD_SAFETY_VALVE] if truncated else text), truncated, None
+            return text, False, None
         result = _get_old_interpretation(number, True, "", False, "")
     else:
         cached = _load_new_cases().get(f"{year}_{number}")
         if cached and "reasoning" in cached:
             text = cached["reasoning"]
-            truncated = len(text) > HARD_SAFETY_VALVE
-            return (text[:HARD_SAFETY_VALVE] if truncated else text), truncated, None
+            return text, False, None
         result = _get_new_ruling(year, number, True, "", False, "")
     if not result.get("success"):
         return "", False, result
@@ -625,17 +602,10 @@ def _attach_long_field(
             )
         return
 
-    # include_full 模式；意見書可用 offset（opinions_offset）分段讀完超過安全閥的長文
-    offset = max(0, offset)
-    next_offset = offset + HARD_SAFETY_VALVE
-    next_step = f"請以 opinions_offset={next_offset} 再查一次續讀後段。" if field_name == "opinions" else None
-    text, trunc = _apply_safety_valve((raw_text or "")[offset:], next_step)
-    result[field_name] = text
-    result[f"{field_name}_truncated"] = trunc
-    if offset or trunc:
-        result[f"{field_name}_full_length"] = raw_len
-    if trunc and next_step:
-        result[f"{field_name}_next_offset"] = next_offset
+    # 保留 offset 參數相容性，從指定位置回傳所有剩餘文字。
+    result[field_name] = (raw_text or "")[max(0, offset):]
+    result[f"{field_name}_truncated"] = False
+    result[f"{field_name}_full_length"] = raw_len
 
 
 # ─────────────────────────────────────────────────────────────
@@ -681,7 +651,7 @@ def get_interpretation(
       fetch 意見書，無需再設 `include_opinions=True`）
     - 找不到 match 時回 `*_match_count=0` 與原文長度，LLM 可判斷是否改用全文模式
     - 最多回 10 個 match；若總數超過 10，`*_match_count` 會反映真實總數
-    - keyword 模式**不會**觸發安全閥，因為它本來就是抽樣片段
+    - keyword 模式只回命中片段；需要完整上下文時使用 include_reasoning／include_opinions
 
     🔴 include_reasoning（預設 False，全文模式）：取得「理由書」/「理由」全文
     - 何時用：學生引的是具體推論細節、無法先猜 keyword 時
@@ -695,16 +665,11 @@ def get_interpretation(
       transcribed=true 表示該份 PDF 無法擷取文字、改由頁面影像轉錄，引用前應核對官網 PDF
 
     🎯 opinion_document（預設 ""）：只取標題含此字串的意見書全文，例如 `opinion_document="許宗力"`
-    - 何時用：意見書合計超過安全閥、要讀其中一位大法官的完整意見時
-    - 單份仍超過 15000 字時回傳 `opinions_next_offset`，以相同參數加 `opinions_offset=該值` 續讀後段
+    - 何時用：只需要其中一位大法官的完整意見時；全文不按字數截斷
 
     ⚠️ 平行呼叫限制：若同一 turn 需查多個解釋，一律先用預設值抓全部，評估後再對
     「最關鍵的一個」發第二次呼叫。**絕對不要對多個解釋同時開啟全文模式**。若真要
     深挖多個，用 keyword 模式可大幅降低 token 用量。
-
-    🛡️ 極端長文安全閥（僅全文模式觸發）：若單一欄位超過 15000 字（例如釋字 748 同婚案
-    的意見書），會截斷並在尾端注入 system warning。LLM 不得因看不到某段就斷言
-    「大法官並未提及」。
 
     Args:
         case_id: 解釋/裁判字號字串
@@ -713,7 +678,7 @@ def get_interpretation(
         include_opinions: 是否回傳「意見書」全文
         opinions_keyword: 若非空，在意見書中搜尋該關鍵字並回片段（覆蓋 include_opinions）
         opinion_document: 若非空，只取標題含此字串的意見書（例如大法官姓名）
-        opinions_offset: 意見書全文從第幾字開始回傳（續讀被截斷的長文，值取自 opinions_next_offset）
+        opinions_offset: 意見書全文從第幾字開始回傳（預設 0，回傳所有剩餘文字）
 
     Returns:
         成功：success=True 與預設層欄位，加上：
@@ -810,7 +775,7 @@ def _get_old_interpretation(
     old_opinions = parsed.get(OLD_OPINIONS_KEY) or parsed.get(NEW_OPINIONS_KEY, "")
 
     # 預設層
-    main_text, mt_trunc = _apply_safety_valve(parsed.get("解釋文", ""))
+    main_text, mt_trunc = parsed.get("解釋文", ""), False
     result = {
         "success": True,
         "type": "釋字",
@@ -917,8 +882,8 @@ def _get_new_ruling(
         return sanity
 
     # 預設層：新制含判決摘要（短、官方摘要，預設回）
-    main_text, mt_trunc = _apply_safety_valve(parsed.get("主文", ""))
-    summary, sm_trunc = _apply_safety_valve(parsed.get("判決摘要", ""))
+    main_text, mt_trunc = parsed.get("主文", ""), False
+    summary, sm_trunc = parsed.get("判決摘要", ""), False
     result = {
         "success": True,
         "type": "憲判字",
@@ -999,8 +964,6 @@ def get_citations(
     「釋字第 N 號」與「Y 年憲判字第 N 號」兩種標準格式。
 
     ⚠️ 限制：
-    - 若理由書超過 15000 字被安全閥截斷，截斷後段落中的引用會遺漏；
-      此時 `reasoning_truncated=True` 提醒清單可能不完整。
     - 非標準格式目前不匹配，例如「第 748 號解釋」（前面沒有「釋字」）。
       並列的「釋字第 A 號、第 B 號及第 C 號」會一併收錄。
     - 早期大法官解釋中以中文數字書寫字號的案件（如「釋字第八十五號」）不匹配。
@@ -1063,7 +1026,7 @@ def get_citations(
     }
     if truncated:
         result["reasoning_truncated_warning"] = (
-            "理由書因超過 15000 字被安全閥截斷，截斷部分的引用未被收錄。"
+            "來源理由書不完整，缺少部分的引用未被收錄。"
             "本清單可能不完整。若需完整引用，請人工查閱官方網站全文。"
         )
     return result

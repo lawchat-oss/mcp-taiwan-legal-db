@@ -6,7 +6,7 @@ uflb:114-56、csptc:184254、fsc_sanction:sfb-202608120002、cy_report:133-49407
 官方已遮蔽的姓名（○○、ΟΟΟ、ＯＯ）原樣保留；律師懲戒決議的被付懲戒律師姓名為官方公開資訊。
 
 未收錄：NCC（Cloudflare 驗證擋自動連線）、個資會（尚無公開決定）、懲戒法院／職務法庭（已在裁判書查詢）、
-醫事懲戒（查詢頁的驗證碼只在前端檢查，不繞過）、工程會履約爭議調解（只公開進度，沒有內容）。
+工程會履約爭議調解（只公開進度，沒有內容）。
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from urllib.parse import quote
 import httpx
 from bs4 import BeautifulSoup
 
+from mcp_server.tools import medical_discipline
 from mcp_server.tools.agency_interpretations import _date, _group, _html_text, _office_text, _paged, _session, _text
 from mcp_server.tools.pdf_text import clean_pdf_text, is_garbled, pdf_to_text
 
@@ -636,6 +637,7 @@ _CY_KEYS = {"133": "cy_report", "134": "cy_correction", "135": "cy_impeachment",
 _CY_LABELS = {n: f"監察院{category}" for n, (_, category) in _CY_LISTS.items()}
 
 SOURCES = {
+    "medical_discipline": ("醫事懲戒決議", ("醫事懲戒", "醫師懲戒", "藥事懲戒"), medical_discipline.search, medical_discipline.get),
     "pcc_complaint": ("工程會採購申訴審議判斷", ("工程會", "採購申訴", "申訴審議判斷", "政府採購"),
                       _pcc_search, _pcc_get),
     "uflb": ("勞動部不當勞動行為裁決", ("不當勞動行為", "裁決", "勞動部裁決", "工會"), _uflb_search, _uflb_get),

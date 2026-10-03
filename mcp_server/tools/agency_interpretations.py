@@ -53,7 +53,7 @@ from bs4 import BeautifulSoup
 
 from mcp_server.cache.db import CacheDB
 from mcp_server.config import USER_DATA_DIR
-from mcp_server.tools import fint, ip_guidelines, tls
+from mcp_server.tools import fint, ip_guidelines, public_browser, tls
 from mcp_server.tools._errors import error_response
 
 logger = logging.getLogger(__name__)
@@ -61,7 +61,6 @@ logger = logging.getLogger(__name__)
 # 工程會的 WAF 會擋舊版 Chrome 的 User-Agent
 USER_AGENT = fint.USER_AGENT
 PAGE_SIZE = 20
-MAX_FULL_TEXT = 20000
 STATUS_TTL = 7 * 86400  # 函釋可能事後被停止適用，全文快取不放 30 天
 _unwrap = fint.unwrap
 
@@ -398,6 +397,9 @@ async def _mohw_get(http: httpx.AsyncClient, native_id: str) -> dict:
 # 來源代碼 → (網址, 機關[, GroupID, 沒標「廢」可否說適用中])；GroupID 是各站自己的類別編號（LawQuery.aspx 的
 # chkLawTypes），多數站 2 = 行政規則。行政規則類的「現行」「已廢止」兩個篩選剛好切分全部資料，沒標「廢」即現行
 _LAWSYS = {
+    "hakka": ("https://law.hakka.gov.tw/", "客家委員會", "2", False),
+    "ocac": ("https://law.ocac.gov.tw/law/", "僑務委員會", "2", False),
+    "sports": ("https://law.sports.gov.tw/", "運動部", "2", False),
     "fsc": ("https://law.fsc.gov.tw/", "金融監督管理委員會"),
     "moe": ("https://edu.law.moe.gov.tw/", "教育部"),
     "moa": ("https://law.moa.gov.tw/", "農業部"),
@@ -439,6 +441,21 @@ def _plain(el) -> str:
     return re.sub(r"\s+", " ", el.get_text()).strip() if el else ""
 
 
+async def _lawsys_request(key: str, http, url: str, **kwargs):
+    if key == "hakka":
+        async with httpx.AsyncClient(timeout=60, headers=http.headers, follow_redirects=True,
+                                     verify=tls.context_with(tls.TWCA_SSL_CA_2023)) as own:
+            r = await own.get(url, **kwargs)
+    elif key == "sports":
+        return await public_browser.get(http, url, selector=".tab-result, .tab-edit, [id$=lblMsg]", **kwargs)
+    else:
+        r = await http.get(url, **kwargs)
+    r.raise_for_status()
+    if key in ("hakka", "ocac") and not public_browser._ready(r.text, ".tab-result, .tab-edit, [id$=lblMsg]"):
+        raise RuntimeError("官網未回傳法規查詢內容，可能仍在驗證頁")
+    return r
+
+
 async def _lawsys_search(key: str, http: httpx.AsyncClient, q: Query) -> list[dict]:
     base, agency, group, affirm = (*_LAWSYS[key], "2", True)[:4]
     params = {"NLawTypeID": "all", "GroupID": group, "KW": q.keyword, "name": "1", "content": "1", "page": q.page}
@@ -448,7 +465,7 @@ async def _lawsys_search(key: str, http: httpx.AsyncClient, q: Query) -> list[di
         params["StartDate"] = q.start
     if q.end:
         params["EndDate"] = q.end
-    r = await http.get(base + "LawResult.aspx", params=params)  # GroupID 才是類別（2 = 行政規則）
+    r = await _lawsys_request(key, http, base + "LawResult.aspx", params=params)
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
     m = re.search(r"法規類別 全部 (\d+)", soup.get_text(" ", strip=True))
@@ -474,14 +491,14 @@ async def _lawsys_search(key: str, http: httpx.AsyncClient, q: Query) -> list[di
 async def _lawsys_get(key: str, http: httpx.AsyncClient, native_id: str) -> dict:
     base, agency, _, affirm = (*_LAWSYS[key], "2", True)[:4]
     url = f"{base}LawContent.aspx?id={_check_id(native_id, '[A-Z]+[0-9]+')}"
-    r = await http.get(url)
+    r = await _lawsys_request(key, http, url)
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
     fei = soup.select_one("span.label-fei")
     label = fei.extract().get_text(strip=True) if fei else ""  # 不然法規名稱開頭會多一個「廢」
     fields = {re.sub(r"\s", "", _text(tr.th)).rstrip("："): _text(tr.td)
               for tr in soup.select("table.tab-edit tr") if tr.th and tr.td}
-    body = soup.select_one("#ctl00_cp_content_divContent")
+    body = soup.select_one("#ctl00_cp_content_divContent, #ctl00_cp_content_divLawContent50")
     if not fields or body is None:
         raise LookupError(native_id)
     doc_number = _fold(fields.get("發文字號", ""))
@@ -1534,7 +1551,11 @@ def _office_text(blob: bytes) -> str:
         if "word/document.xml" in names:
             xml, para, run = z.read("word/document.xml").decode("utf-8"), r"</w:p>", r"<w:t[^>]*>([^<]*)</w:t>"
         elif "content.xml" in names:
-            xml, para, run = z.read("content.xml").decode("utf-8"), r"</text:p>|</text:h>", r">([^<]+)<"
+            root = ElementTree.fromstring(z.read("content.xml"))
+            # Plain text:p elements need no nested span; splitting the closing tag loses that text.
+            tags = {"{urn:oasis:names:tc:opendocument:xmlns:text:1.0}p",
+                    "{urn:oasis:names:tc:opendocument:xmlns:text:1.0}h"}
+            return "\n".join("".join(node.itertext()).strip() for node in root.iter() if node.tag in tags).strip()
         else:
             return ""
     lines = ["".join(re.findall(run, p)) for p in re.split(para, xml)]
@@ -1823,6 +1844,133 @@ async def _fint_get(http: httpx.AsyncClient, native_id: str) -> dict:
 # 對外介面
 # ─────────────────────────────────────────────────────────────
 
+# NCC 公開行政函釋（法規解釋專站；每次只查指定條件）
+_NCC_BASE = "https://ncclaw.ncc.gov.tw/FINT/"
+
+
+async def _ncc_search(http, q: Query) -> list[dict]:
+    if not (q.keyword or q.number or q.start or q.end):
+        raise ValueError("NCC 請指定關鍵字、字號或日期範圍")
+    params = {"allfccode": "B***", "btype": "B***", "now": "1", "lnabndn": "1",
+              "lpcode": "etype_ALL", "lpcodetype": "E", "keyword": q.keyword,
+              "N2": q.number_digits, "sdate": q.start, "edate": q.end}
+    r = await public_browser.get(http, _NCC_BASE + "results.aspx", params={k: v for k, v in params.items() if v},
+                                 selector=".tab-result2, #ctl00_cph_content_pnlNoData")
+    soup = BeautifulSoup(r.text, "html.parser")
+    items = []
+    for tr in soup.select(".tab-result2 tr"):
+        a = tr.select_one('a[href*="FINTQRY04.aspx"]')
+        rid = re.search(r"fecode=(FE\d+)", a.get("href", "")) if a else None
+        if not rid:
+            continue
+        divs = tr.select("td > div")
+        items.append({"id": "ncc:" + rid.group(1), "agency": "國家通訊傳播委員會", "category": "行政函釋",
+                      "doc_number": _fold(_text(a)), "date": _date(_text(divs[1])) if len(divs) > 1 else "",
+                      "summary": re.sub(r"^要\s*旨[：:]\s*", "", _plain(tr.select_one(".list-issue")))})
+    # 官網把本次檢索命中放在同頁；只切分這次結果，不巡訪分類或其他分頁。
+    return [_group("國家通訊傳播委員會", "行政函釋", len(items), *_paged(items, q.page))]
+
+
+async def _ncc_get(http, native_id: str) -> dict:
+    url = _NCC_BASE + "FINTQRY04.aspx?fecode=" + _check_id(native_id, r"FE\d{6}")
+    r = await public_browser.get(http, url, selector=".fint-table")
+    soup = BeautifulSoup(r.text, "html.parser")
+    fields = {}
+    for row in soup.select(".fint-table tr"):
+        cells = row.find_all(["th", "td"], recursive=False)
+        if len(cells) == 2:
+            fields[re.sub(r"[\s：:]", "", _text(cells[0]))] = _text(cells[1])
+    body = soup.select_one(".fint-pre pre")
+    if body is None or not fields.get("發文字號"):
+        raise LookupError(native_id)
+    return {"agency": fields.get("發文單位", "國家通訊傳播委員會"), "doc_number": _fold(fields["發文字號"]),
+            "date": _date(fields.get("發文日期", "")), "summary": fields.get("要旨", ""),
+            "full_text": _unwrap(body.get_text()), "source_url": url}
+
+
+# 關務署新頒釋函：一次取得 token、POST 一頁標題，不快取整站清單
+_CUSTOMS = "https://web.customs.gov.tw/"
+
+
+async def _customs_search(http, q: Query):
+    async with _session() as own:
+        r = await own.get(_CUSTOMS + "multiplehtml/41")
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+        form = soup.select_one('form[action="/multiplehtml/41"]')
+        if form is None:
+            raise RuntimeError("關務署查詢表單已變更")
+        data = {x["name"]: x.get("value", "") for x in form.select('input[type=hidden][name]')}
+        if not data.get("csrfToken"):
+            raise RuntimeError("關務署查詢無法取得 CSRF token")
+        data.update(title=q.keyword or q.number_digits, page=str(q.page), pageSize="10")
+        r = await own.post(_CUSTOMS + "multiplehtml/41", data=data)
+        r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    count = re.search(r"(\d+)\s*筆資料", _text(soup))
+    if count is None:
+        raise RuntimeError("關務署未回傳可確認的筆數")
+    rows = []
+    for a in soup.select('a[href*="singlehtml/41?cntId="]'):
+        match = re.search(r"cntId=([0-9a-f]{32})", a["href"])
+        if match:
+            rows.append({"id": "customs:" + match.group(1), "agency": "財政部關務署", "category": "新頒釋函",
+                         "doc_number": "", "date": "", "summary": _text(a)})
+    total = int(count.group(1))
+    return [_group("財政部關務署", "新頒釋函", total, rows, q.page * 10 < total,
+                   note="僅查標題；字號只在沒有關鍵字時當標題查詢；日期條件未套用")]
+
+
+async def _customs_get(http, native_id):
+    url = _CUSTOMS + "singlehtml/41?cntId=" + _check_id(native_id, r"[0-9a-f]{32}")
+    r = await http.get(url)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    article = soup.select_one(".article-page article")
+    if article is None or not _text(article):
+        raise LookupError(native_id)
+    text = _html_text(str(article))
+    number = re.search(r"[^\s\d年月日，。、：]{1,10}字第\s*\d+\s*號", text)
+    day = re.search(r"中華民國\s*\d+年\s*\d+月\s*\d+日", text)
+    return {"agency": "財政部關務署", "summary": _text(soup.select_one("h2")),
+            "doc_number": number.group() if number else "", "date": _date(day.group()) if day else "",
+            "full_text": text, "source_url": url}
+
+
+# 陸委會主站「大陸廣告規範平台」：只讀指定專區的一頁目錄
+_MAC_MAIN = "https://www.mac.gov.tw/"
+_MAC_LETTERS = _MAC_MAIN + "Content_List.aspx?n=8E8FA34452E8DBC2"
+
+
+async def _mac_letters_search(http, q: Query):
+    r = await public_browser.get(http, _MAC_LETTERS, selector="#base-content .content-list")
+    soup = BeautifulSoup(r.text, "html.parser")
+    rows = []
+    for a in soup.select('#base-content .content-list a[href^="cp.aspx?n="]'):
+        match = re.fullmatch(r"cp\.aspx\?n=([A-F0-9]{16})", a["href"])
+        title = _text(a)
+        if match and any(x in title for x in ("疑義", "參考意見", "函")) and all(k in title for k in q.keyword.split()):
+            rows.append({"id": "mac_letters:" + match.group(1), "agency": "大陸委員會", "category": "大陸廣告法令函釋",
+                         "doc_number": "", "date": "", "summary": title})
+    return [_group("大陸委員會", "大陸廣告法令函釋", len(rows), *_paged(rows, q.page),
+                   note="限主站大陸廣告專區的函文與參考意見，僅比對標題；字號、日期條件未套用；不代表全部陸委會函釋")]
+
+
+async def _mac_letters_get(http, native_id):
+    url = _MAC_MAIN + "cp.aspx?n=" + _check_id(native_id, r"[A-F0-9]{16}")
+    r = await public_browser.get(http, url, selector="#CCMS_Content .area-editor")
+    soup = BeautifulSoup(r.text, "html.parser")
+    body = soup.select_one("#CCMS_Content .area-editor")
+    text = _html_text(str(body)) if body else ""
+    if not text:
+        raise LookupError(native_id)
+    number = re.search(r"[^\s\d年月日，。、：]{1,10}字第\s*\d+\s*號", text)
+    day = re.search(r"中華民國\s*\d+年\s*\d+月\s*\d+日", text)
+    title = _text(soup.title).removeprefix("大陸委員會-")
+    return {"agency": "大陸委員會", "summary": title, "full_text": text, "source_url": url,
+            "doc_number": number.group() if number else "", "date": _date(day.group()) if day else ""}
+
+
 def _lawsys(key: str) -> tuple:
     return partial(_lawsys_search, key), partial(_lawsys_get, key)
 
@@ -1832,6 +1980,12 @@ def _exec(key: str) -> tuple:
 
 # 來源代碼 → (名稱, 可用來指定的機關名／別名, search, get)；順序即去重時的優先序（機關自己的系統優先）
 SOURCES = {
+    "mac_letters": ("陸委會主站廣告函釋", ("陸委會主站", "陸委會主站廣告函釋", "陸委會", "大陸委員會"), _mac_letters_search, _mac_letters_get),
+    "customs": ("關務署新頒釋函", ("關務署", "關務署新頒釋函"), _customs_search, _customs_get),
+    "ncc": ("NCC", ("NCC", "ncc", "通傳會", "國家通訊傳播委員會"), _ncc_search, _ncc_get),
+    "hakka": ("客委會", ("客委會", "客家委員會"), *_lawsys("hakka")),
+    "ocac": ("僑委會", ("僑委會", "僑務委員會"), *_lawsys("ocac")),
+    "sports": ("運動部", ("運動部",), *_lawsys("sports")),
     "moj": ("法務部", ("法務部",), _moj_search, _moj_get),
     "mol": ("勞動部", ("勞動部", "勞委會", "行政院勞工委員會"), _mol_search, _mol_get),
     "pcc": ("工程會", ("工程會", "公共工程委員會", "行政院公共工程委員會"), _pcc_search, _pcc_get),
@@ -1883,7 +2037,7 @@ SOURCES = {
 
 
 # 多為機關內部作業要點：不指定機關時不查，免得每次搜尋都多打這些站、結果混入不相干的要點
-_NAMED_ONLY = {"mofa", "vac", "nusc", "ndc"}
+_NAMED_ONLY = {"mofa", "vac", "nusc", "ndc", "hakka", "ocac", "sports", "ncc", "customs", "mac_letters"}
 
 
 def resolve_sources(agency: str) -> tuple[list[str], list[str]]:
@@ -1981,17 +2135,17 @@ class AgencyInterpretationClient:
             )
         cache_key = f"interp:v2:{interpretation_id}"  # v2 起有效力標示，舊快取沒有
         cached = await self.cache.get_judgment(cache_key)
-        if cached:
+        if cached and not cached.get("full_text_truncated"):
             return {"success": True, "cached": True, **cached}
         label, _, _, get = SOURCES[key]
         try:
             data = await get(self.http, native_id)
         except LookupError:
             return error_response(f"{label}查無此函釋：{interpretation_id}")
-        except (httpx.HTTPError, ValueError, KeyError, ElementTree.ParseError) as e:
+        except (httpx.HTTPError, ValueError, RuntimeError, KeyError, ElementTree.ParseError) as e:
             return error_response(f"{label}連線或解析失敗：{type(e).__name__}: {e}")
         full = data.get("full_text", "")
-        data["full_text"], data["full_text_truncated"] = full[:MAX_FULL_TEXT], len(full) > MAX_FULL_TEXT
+        data["full_text"], data["full_text_truncated"] = full, False
         data = {"id": interpretation_id, "source": label, **data}
         await self.cache.set_judgment(cache_key, data, source="agency_interpretation", ttl=STATUS_TTL)
         return {"success": True, "cached": False, **data}

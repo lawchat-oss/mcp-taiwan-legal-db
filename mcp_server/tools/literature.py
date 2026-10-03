@@ -5,7 +5,7 @@
 | jirs | 司法院電子出版品檢索 jirs.judicial.gov.tw | 專題研究報告（含司法研究年報），全文 PDF 按章分檔 |
 | ncl | 國家圖書館 臺灣期刊論文索引 tpl.ncl.edu.tw | 期刊論文書目、摘要；已授權者附全文 PDF |
 | grb | 政府研究資訊系統 GRB | 政府補助研究計畫書目與摘要（成果報告下載需 reCAPTCHA，只給連結） |
-| journals | 中研院法學期刊、政大法學評論 | 以國圖索引檢索，全文取自期刊官網的免費 PDF |
+| journals | 中研院法學期刊、政大法學評論、臺大法學論叢 | 以國圖索引檢索，全文取自期刊官網的免費 PDF |
 
 id 一律為「來源代碼:原站識別碼」，例如 ncl:A15001353、grb:13540821、
 jirs:202603:韓國量刑準則及保護監護制度之研究（司法院沒有穩定的報告代碼可從列表取得，以年月＋報告名稱定位）。
@@ -35,7 +35,6 @@ from mcp_server.tools.pdf_text import pdf_to_text
 logger = logging.getLogger(__name__)
 
 USER_AGENT = fint.USER_AGENT
-MAX_FULL_TEXT = 60000
 
 JIRS_BASE = "https://jirs.judicial.gov.tw/JudLib/"
 NCL_BASE = "https://tpl.ncl.edu.tw/NclService/"
@@ -43,6 +42,7 @@ GRB_API = "https://grbdef.stpi.niar.org.tw/searcher"
 GRB_PLAN_URL = "https://www.grb.gov.tw/search/planDetail?id={}"
 IIAS_BASE = "https://www.iias.sinica.edu.tw/"
 NCCU_BASE = "http://review.law.nccu.edu.tw"  # HTTPS 憑證過期，http 可直接用
+NTU_BASE = "https://www.law.ntu.edu.tw/center/"
 
 _CJK = "㐀-鿿豈-﫿"
 _REQUIRED = ("title", "authors", "venue", "date", "abstract", "source_url")
@@ -69,7 +69,7 @@ def _plain(s: str | None) -> str:
 
 def _doc(full_text: str, **fields) -> dict:
     return {**{k: v for k, v in fields.items() if v or k in _REQUIRED},
-            "full_text": full_text[:MAX_FULL_TEXT], "full_text_truncated": len(full_text) > MAX_FULL_TEXT}
+            "full_text": full_text, "full_text_truncated": False}
 
 
 def _group(key: str, total: int, items: list[dict], has_more: bool, note: str = "") -> dict:
@@ -159,19 +159,15 @@ async def _jirs_get(http, native_id: str) -> dict:
     chapters = [{"title": re.sub(r"\.pdf\b.*$", "", _text(a), flags=re.I), "pdf_url": urljoin(JIRS_BASE, a["href"])}
                 for a in links]
     parts: list[str] = []
-    for ch in chapters:  # 一章一個 PDF：依序擷取到字數上限為止
-        if sum(map(len, parts)) >= MAX_FULL_TEXT:
-            break
+    for ch in chapters:  # 一章一個 PDF：完整讀取所選報告的章節
         parts.append(f"【{ch['title']}】\n{await _pdf_text(http, ch['pdf_url'])}")
     lk = re.search(r"lk=([^&]+)", links[0]["href"]) if links else None
-    skipped = len(chapters) - len(parts)
     return _doc(
         "\n\n".join(parts), title=fields.get("title", row["title"]),
         authors=[a for a in re.split(r"[、，,;；\s]+", fields.get("authors", "")) if a] or row["authors"],
         venue=fields.get("venue") or "司法院專題研究報告", date=_ym(fields.get("date", "")) or row["date"],
         abstract="", source_url=str(httpx.URL(JIRS_BASE + "EBookQRY03.asp", params=params)),
         report_key=unquote(lk.group(1)) if lk else "", chapters=chapters,
-        note=f"全文按章分檔，已達字數上限，另有 {skipped} 章未擷取，請開 chapters 的 pdf_url。" if skipped else "",
     )
 
 
@@ -378,8 +374,28 @@ async def _nccu_pdf(http, meta: dict) -> str | None:
                   for a in soup.select('a[href*="/uploads/asset/"]')], meta)
 
 
-# 臺大法學論叢（官網多數卷期只有摘要 PDF）、興大法學（WAF 連續數次請求即斷線，且不少篇無全文）未納入
-JOURNALS = {"中研院法學期刊": _iias_pdf, "政大法學評論": _nccu_pdf}
+async def _ntu_pdf(http, meta: dict) -> str | None:
+    # 只讀指定卷的一頁目錄、該期及選中的一篇；不遍歷歷年卷期。
+    volume = re.fullmatch(r"(\d{1,3}):(\d{1,2})", meta["volume"])
+    if not volume:
+        return None
+    vol, number = volume.groups()
+    soup = await _soup(http, NTU_BASE + f"index.php/itemlist/tag/第{vol}卷")
+    issue = next((a["href"] for a in soup.select('a[href^="/center/"][href*="/item/"]')
+                  if f"第{vol}卷第{number}期" in re.sub(r"\s", "", _text(a))), None)
+    if not issue:
+        return None
+    soup = await _soup(http, urljoin(NTU_BASE, issue))
+    candidates = []
+    for a in soup.select('.itemAttachments a[href^="/center/media/k2/attachments/"]'):
+        label = a.get("title", "") + unquote(a["href"])
+        # 同期可能同時放中文摘要、英文摘要與定稿；只取明確標為全文／定稿的檔案。
+        if re.search(r"全文|定稿", label) and not re.search(r"摘要|abstract", label, re.I):
+            candidates.append((label, urljoin(NTU_BASE, a["href"])))
+    return _pick(candidates, meta)
+
+
+JOURNALS = {"中研院法學期刊": _iias_pdf, "政大法學評論": _nccu_pdf, "國立臺灣大學法學論叢": _ntu_pdf}
 
 
 async def _journals_search(http, keyword: str, year_from: int, year_to: int, page: int,
@@ -392,7 +408,7 @@ async def _journals_get(http, sysid: str) -> dict:
     meta, _ = await _ncl_detail(http, sysid)  # 只用國圖書目與摘要，全文取自期刊官網
     resolve = next((f for name, f in JOURNALS.items() if name in meta["venue"]), None)
     pdf_url, text, note = None, "", ""
-    if resolve and meta["volume"].isdigit():
+    if resolve and re.fullmatch(r"\d+(?::\d+)?", meta["volume"]):
         try:
             pdf_url = await resolve(http, meta)
             text = await _pdf_text(http, pdf_url) if pdf_url else ""
@@ -413,7 +429,7 @@ SOURCES = {
     "jirs": ("司法院專題研究報告", ("司法研究年報", "專題研究報告", "研究報告", "司法院"), _jirs_search, _jirs_get),
     "ncl": ("國家圖書館臺灣期刊論文索引", ("國圖", "國家圖書館", "期刊", "期刊論文", "期刊索引"), _ncl_search, _ncl_get),
     "grb": ("政府研究資訊系統", ("GRB", "研究計畫", "國科會", "政府研究計畫"), _grb_search, _grb_get),
-    "journals": ("開放取用法學期刊", ("開放期刊", "法學期刊", "全文期刊", *JOURNALS), _journals_search, _journals_get),
+    "journals": ("開放取用法學期刊", ("開放期刊", "法學期刊", "全文期刊", "臺大法學論叢", *JOURNALS), _journals_search, _journals_get),
 }
 _CATEGORY = {"jirs": "專題研究報告", "ncl": "期刊論文", "grb": "研究計畫", "journals": "期刊論文（官網全文）"}
 _NO_CACHE = {"ncl"}  # 國圖授權全文不得轉存
@@ -441,6 +457,7 @@ class LiteratureClient:
         await self.http.aclose()
 
     async def search(self, keyword: str, source: str = "", year_from: int = 0, year_to: int = 0, page: int = 1) -> dict:
+        source = source.replace("臺大法學論叢", "國立臺灣大學法學論叢")
         keys = resolve_sources(source)
         if keys is None:
             return error_response(f"不支援的來源「{source}」",
@@ -488,7 +505,7 @@ class LiteratureClient:
         cache_key = f"literature:{item_id}"
         if key not in _NO_CACHE:
             cached = await self.cache.get_judgment(cache_key)
-            if cached:
+            if cached and not cached.get("full_text_truncated"):
                 return {"success": True, "cached": True, **cached}
         label, _, _, get = SOURCES[key]
         try:

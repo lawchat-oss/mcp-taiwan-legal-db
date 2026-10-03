@@ -43,7 +43,7 @@ def test_resolve_sources_maps_names_and_falls_back_to_gazette():
     assert ai.resolve_sources("勞委會") == (["mol"], [])
     assert ai.resolve_sources("金管會") == (["fsc"], [])
     keys, others = ai.resolve_sources("內政部,客委會")
-    assert keys == ["ris", "nlma", "land", "nfa", "moi", "gazette"] and others == ["客委會"]
+    assert keys == ["ris", "nlma", "land", "nfa", "moi", "hakka"] and others == []
 
 
 @pytest.mark.parametrize("agency, keys", [
@@ -51,7 +51,7 @@ def test_resolve_sources_maps_names_and_falls_back_to_gazette():
     ("考試院", ["mocs", "csptc", "moex", "exam"]), ("地政司", ["land"]), ("內政部地政司", ["land"]),
     ("交通部", ["motc"]), ("央行", ["cbc"]), ("教育部", ["moe"]), ("國科會", ["nstc"]), ("公平會", ["ftc"]),
     ("台北市", ["taipei"]), ("北市", ["taipei"]), ("消防署", ["nfa"]),
-    ("關務署", ["mof_rules"]), ("人事總處", ["dgpa"]), ("中選會", ["cec"]), ("陸委會", ["mac"]),
+    ("關務署", ["customs", "mof_rules"]), ("人事總處", ["dgpa"]), ("中選會", ["cec"]), ("陸委會", ["mac_letters", "mac"]),
 ])
 def test_resolve_sources_routes_agencies_to_their_own_systems(agency, keys):
     assert ai.resolve_sources(agency) == (keys, [])

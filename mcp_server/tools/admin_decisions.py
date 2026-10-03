@@ -27,7 +27,6 @@ from mcp_server.tools.pdf_text import pdf_to_text
 logger = logging.getLogger(__name__)
 
 USER_AGENT = fint.USER_AGENT
-MAX_FULL_TEXT = 30000
 
 EY_BASE = "https://appeal.ey.gov.tw"
 FTC_LIST_URL = "https://www.ftc.gov.tw/internet/main/decision/decisionList.aspx?mid=11"
@@ -309,7 +308,7 @@ class AdminDecisionClient:
         key, _, native_id = decision_id.partition(":")
         if key not in SOURCES or not native_id:
             return error_response(f"id 格式錯誤：「{decision_id}」，請使用 search_administrative_decisions 回傳的 id")
-        cache_key = f"decision:{decision_id}"
+        cache_key = f"decision:v2:{decision_id}"  # v2 removes both assembly and return character limits
         cached = await self.cache.get_judgment(cache_key)
         if cached:
             return {"success": True, "cached": True, **cached}
@@ -318,11 +317,11 @@ class AdminDecisionClient:
             data = await get(self.http, native_id)
         except LookupError:
             return error_response(f"{label}查無此件：{decision_id}")
-        except (httpx.HTTPError, ValueError) as e:
+        except (httpx.HTTPError, ValueError, RuntimeError) as e:
             return error_response(f"{label}連線或解析失敗：{type(e).__name__}: {e}")
         full = data["full_text"]
         data = {"id": decision_id, "source": label, **data,
-                "full_text": full[:MAX_FULL_TEXT], "full_text_truncated": len(full) > MAX_FULL_TEXT}
+                "full_text": full, "full_text_truncated": False}
         if full:  # 掃描檔、尚未公開理由的案件不長期快取，日後可能取得全文
             await self.cache.set_judgment(cache_key, data, source="admin_decision")
         return {"success": True, "cached": False, **data}

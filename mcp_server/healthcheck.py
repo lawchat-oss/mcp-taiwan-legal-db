@@ -50,6 +50,21 @@ REGISTRIES = {
 
 # 預設關鍵字在這些來源查不到東西（只比對標題、或領域不同）
 KEYWORDS = {
+    ("interpretations", "mac_letters"): "刊登",
+    ("interpretations", "customs"): "關稅法",
+    ("decisions", "moenv"): "廢棄物",
+    ("decisions", "mol"): "勞動基準法",
+    ("decisions", "moc"): "票券",
+    ("decisions", "keelung"): "114基府訴決字第113號",
+    ("decisions", "dgpa"): "年終考核",
+    ("decisions", "medical_discipline"): "何政岳",
+    ("decisions", "moi"): "土地",
+    ("decisions", "mohw"): "醫師",
+    ("decisions", "moea"): "專利",
+    ("decisions", "cec"): "民調",
+    ("interpretations", "ncc"): "民營廣播",
+    ("decisions", "moa"): "漁業",
+    ("decisions", "moe"): "教師",
     ("interpretations", "tipo_guide"): "專利要件",
     ("decisions", "ey"): "罰鍰",
     ("decisions", "pcc_complaint"): "",  # 只能比對爭議類型與條號，空白 = 最近 12 個月
@@ -123,7 +138,7 @@ async def _check(tool: str, source: str, search, get) -> tuple[str, str, str, st
             return tool, source, "FAIL", f"取全文：{detail.get('error', '')}", time.monotonic() - started
         size = _body_length(detail)
         status = "OK" if size >= THIN else "THIN"
-        return tool, source, status, f"{len(items)} 筆；全文 {size} 字", time.monotonic() - started
+        return tool, source, status, f"{len(items)} 筆；全文 {size} 字；id={items[0].get('id') or items[0].get('jid')}", time.monotonic() - started
     except Exception as e:  # noqa: BLE001 — 健康檢查要把任何例外都列出來
         return tool, source, "FAIL", f"{type(e).__name__}: {e}", time.monotonic() - started
 
@@ -133,9 +148,9 @@ def _single_checks(cache: CacheDB, clients: list) -> dict[str, tuple]:
     waf = JudicialWAFBypass()
     jud, doc = JudicialSearchClient(cache, waf), JudgmentDocClient(cache, waf)
     reg, prec, docket = RegulationClient(cache), PrecedentClient(cache), ConstitutionalDocketClient(cache)
-    records, history = LegislativeRecordsClient(cache), LegislativeHistoryClient(cache)
+    records, history, lit = LegislativeRecordsClient(cache), LegislativeHistoryClient(cache), LiteratureClient(cache)
     http = httpx.AsyncClient(timeout=60.0, headers={"User-Agent": USER_AGENT}, follow_redirects=True)
-    clients += [jud, doc, reg, prec, docket, records, http]
+    clients += [jud, doc, reg, prec, docket, records, lit, http]
 
     async def article():
         return {"results": [{"id": "B0000001"}]}
@@ -147,6 +162,8 @@ def _single_checks(cache: CacheDB, clients: list) -> dict[str, tuple]:
         "docket": (lambda: docket.search("", "pending"), lambda i: docket.case_file(i["id"], "")),
         "legislative_bills": (lambda: records.search("勞動基準法", "bills", "all", 0, 1), lambda i: records.get(i["id"])),
         "legislative_gazette": (lambda: records.search("勞動基準法", "gazette", "", 0, 1), lambda i: records.get(i["id"])),
+        "join": (lambda: records.search("條例", "join", "pending", 0, 1), lambda i: records.get(i["id"])),
+        "ntu_journal": (lambda: lit.search("美國推動禁止", "臺大法學論叢"), lambda i: lit.get(i["id"])),
         "drafts": (lambda: records.search("草案", "drafts", "", 0, 1), lambda i: records.get(i["id"])),
         "legislative_history": (lambda: _as_items(history.get("民法", "184")), None),
         "sentencing": (lambda: _as_items(sentencing_statistics(http, "竊盜")), None),

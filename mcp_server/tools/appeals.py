@@ -15,6 +15,8 @@ import base64
 import binascii
 import contextlib
 import math
+import json
+from datetime import datetime, timedelta, timezone
 import re
 import ssl
 from dataclasses import dataclass
@@ -24,13 +26,12 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 import httpx
 from bs4 import BeautifulSoup
 
-from mcp_server.tools import fint, tls
-from mcp_server.tools.agency_interpretations import _date, _html_text, _paged, _text
+from mcp_server.tools import fint, tls, public_browser
+from mcp_server.tools.agency_interpretations import _date, _html_text, _office_text, _paged, _text
 from mcp_server.tools.pdf_text import pdf_to_text
 
 USER_AGENT = fint.USER_AGENT
 CATEGORY = "訴願決定"
-MAX_TEXT = 30000  # 同 admin_decisions.MAX_FULL_TEXT：一筆含多份附件時，擷取到這個長度就停
 MAX_FILES = 5
 
 _NO_YEAR = "此來源無法依年度篩選，未套用年度條件"
@@ -113,6 +114,8 @@ def _result(doc_number: str, date: str, summary: str, full_text: str, source_url
 async def _pdf_text(http: httpx.AsyncClient, url: str) -> str:
     r = await http.get(url)
     r.raise_for_status()
+    if not r.content.startswith(b"%PDF"):
+        raise ValueError("官網未回傳 PDF，可能是驗證頁或錯誤頁：" + url)
     return await asyncio.to_thread(pdf_to_text, r.content)  # 大檔解析不卡住其他查詢
 
 
@@ -996,8 +999,6 @@ async def _r5_get(cfg: _Rhythm, http, sn: str) -> dict:
             raise ValueError(f"官網這筆沒有附件 PDF，請開 {url}")
         texts = []
         for href, name in list(files.items())[:MAX_FILES]:
-            if sum(map(len, texts)) >= MAX_TEXT:
-                break
             text = await _pdf_text(h, href)
             texts.append(f"【{name}】\n{text}" if len(files) > 1 else text)
     title = _text(soup.select_one(cfg.title_selector)) if cfg.title_selector else ""
@@ -1029,6 +1030,503 @@ def _glrs(base: str, **filters: str):
 # 對外介面
 # ─────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────
+# 農業部、教育部：公開 WebForms，不使用登入狀態；分頁最多五頁
+# ─────────────────────────────────────────────────────────────
+
+_MOA_BASE = "https://appeal.moa.gov.tw/Mondel/LaKm/"
+_MOE_BASE = "https://appeal.moe.gov.tw/"
+_WEBFORMS_LIMIT = "此來源單次查詢限前五頁；請縮小關鍵字範圍，或至 source_url 查詢後續頁面"
+
+
+async def _education_agriculture_search(key, http, keyword, year_from, year_to, doc_number, page):
+    if not 1 <= page <= 5:
+        raise ValueError(_WEBFORMS_LIMIT)
+    moa = key == "moa"
+    url = _MOA_BASE + "LaKmQry.aspx" if moa else _MOE_BASE + "hope_search.aspx"
+    prefix = "ctl00$ContentPlaceHolder1$" if moa else "ctl00$cphContent$"
+    async with _client() as client:
+        r = await client.get(url)
+        r.raise_for_status()
+        data = _form(_soup(r))
+        if moa:
+            data.update({prefix + "TextBox8": keyword, prefix + "hidCount": "1",
+                         prefix + "txtAppealnum": _number(doc_number), prefix + "Button1": "查詢"})
+            if year_from:
+                data[prefix + "txtADateBegin"] = f"{year_from:03d}/01/01"
+            if year_to:
+                data[prefix + "txtADateEnd"] = f"{year_to:03d}/12/31"
+        else:
+            data.update({prefix + "txtKW1": keyword or _number(doc_number), prefix + "butSearch": "查詢"})
+            if keyword and doc_number:
+                data.update({prefix + "txtKW2": _number(doc_number), prefix + "ddlOper1": "1"})
+        r = await client.post(url, data=data)
+        r.raise_for_status()
+        soup = _soup(r)
+        if moa and page > 1:
+            button = soup.select_one(f'input[type=submit][value="{page}"]')
+            if button is None:
+                return _page(0, [], False, "指定頁碼不存在")
+            data = _form(soup)
+            data[button["name"]] = button["value"]
+            r = await client.post(url, data=data)
+            r.raise_for_status()
+            soup = _soup(r)
+        elif not moa:
+            for _ in range(1, page):
+                next_page = soup.select_one('a[id$="butNext"][href]')
+                if next_page is None:
+                    return _page(0, [], False, "指定頁碼不存在")
+                data = _form(soup)
+                data.update({"__EVENTTARGET": prefix + "ucPager$butNext", "__EVENTARGUMENT": ""})
+                r = await client.post(url, data=data)
+                r.raise_for_status()
+                soup = _soup(r)
+    selector = "#ContentPlaceHolder1_GridView1" if moa else "table.tableList"
+    table = soup.select_one(selector)
+    if table is None:
+        if not re.search(r"查無|無符合|沒有資料|0\s*筆", _text(soup)):
+            raise RuntimeError(f"官網未回傳查詢結果（可能是驗證或改版）：{url}")
+        return _page(0, [], False)
+    items = []
+    for tr in table.select("tr"):
+        a = tr.select_one('a[href*="Doc11.aspx"]' if moa else 'a[href*="hope_view.aspx"]')
+        if a is None:
+            continue
+        args = parse_qs(urlparse(a["href"]).query)
+        rid = args.get("No" if moa else "cid", [""])[0]
+        cells = tr.find_all("td")
+        if not rid or len(cells) < (3 if moa else 4):
+            continue
+        items.append(_item(rid, _doc_no(_text(a)) if moa else _text(cells[3]),
+                           _iso(_text(cells[2])), _text(a)))
+    text = _text(soup)
+    count = re.search(r"共\s*(\d+)\s*" + ("頁" if moa else "筆"), text)
+    total = int(count.group(1)) * 10 if count and moa else int(count.group(1)) if count else len(items)
+    size = 10 if moa else 20
+    notes = [_WEBFORMS_LIMIT, "列表日期為登錄日期" if moa else "官網僅公開最近二年決定書",
+             _NO_COUNT if moa and count else "", _NO_YEAR if not moa and (year_from or year_to) else ""]
+    return _page(total, items, page * size < total, *notes)
+
+
+async def _moa_get(http, native_id):
+    url = f"{_MOA_BASE}Doc11.aspx?No={native_id}&BriefNo={native_id}&Flag=Other"
+    r = await http.get(url)
+    r.raise_for_status()
+    soup = _soup(r)
+    body = soup.select_one("table")
+    text = _html_text(str(body)) if body else ""
+    if "訴願決定書" not in text or len(text) < 100:
+        raise ValueError("農業部未回傳決定書內容，可能是驗證頁或格式已變更")
+    return _result(_doc_no(text), _signed(text), _cause(text), text, url)
+
+
+async def _moe_get(http, native_id):
+    url = f"{_MOE_BASE}hope_view.aspx?cid={native_id}"
+    r = await http.get(url)
+    r.raise_for_status()
+    soup = _soup(r)
+    body = soup.select_one("pre")
+    text = body.get_text().strip() if body else ""
+    if "訴願決定書" not in text:
+        raise ValueError("教育部未回傳決定書內容，可能是驗證頁或格式已變更")
+    number = re.search(r"發文字號[：:]\s*(\S+)", text)
+    date = re.search(r"發文日期[：:]\s*(.*)", text)
+    return _result(number.group(1) if number else "", _iso(date.group(1)) if date else "",
+                   _cause(text), text, url, notes="官網僅公開最近二年決定書")
+
+
+# 經濟部：官網 SPA 的公開查詢 API，固定 isOpen=true
+_MOEA_BASE = "https://eportal2.moea.gov.tw/EE120/"
+
+
+async def _moea_query(conditions, page=1):
+    body = dict.fromkeys(("caseNoString", "docNo", "appealPerson", "appealPersonRelated",
+                          "appealPersonParticipant", "cause", "mainText", "fact", "reason", "fullText"))
+    body.update(dateRange={"startDate": None, "endDate": None}, isOpen=True)
+    body.update(conditions)
+    async with _client() as client:
+        r = await client.get(_MOEA_BASE + "api/pams-csrf-token")
+        r.raise_for_status()
+        csrf = r.json()
+        if csrf.get("headerName") != "X-XSRF-TOKEN" or not csrf.get("token"):
+            raise RuntimeError("經濟部公開查詢無法取得 CSRF token")
+        r = await client.post(_MOEA_BASE + "api/decisionDoc/search", params={"from": (page - 1) * 10},
+                              json=body, headers={"X-XSRF-TOKEN": csrf["token"]})
+        r.raise_for_status()
+        data = r.json()
+        if not isinstance(data.get("resultList"), list) or "totalSize" not in data:
+            raise RuntimeError("經濟部查詢回應格式不符")
+        return data
+
+
+async def _moea_search(http, keyword, year_from, year_to, doc_number, page):
+    conditions = {"fullText": keyword or None, "docNo": _number(doc_number) or None}
+    dates = {"startDate": f"{year_from + 1911}-01-01" if year_from else None,
+             "endDate": f"{year_to + 1911}-12-31" if year_to else None}
+    conditions["dateRange"] = dates
+    data = await _moea_query(conditions, page)
+    items = [_item(x["caseno"], x.get("sendReceno", ""), _iso(x.get("sendDay", "")),
+                   _html_text(x.get("casrea", ""))) for x in data["resultList"]]
+    return _page(data["totalSize"], items, page * 10 < data["totalSize"], "官網僅公開本年度及前五年度決定書")
+
+
+async def _moea_get(http, native_id):
+    data = await _moea_query({"caseNoString": native_id})
+    row = next((x for x in data["resultList"] if x.get("caseno") == native_id), None)
+    if row is None:
+        raise LookupError(native_id)
+    fields = (("訴願人", "psn1"), ("關係人", "relationPE"), ("參加人", "participatePE"),
+              ("案由", "casrea"), ("主文", "mainText"), ("事實", "fact"), ("理由", "reason"))
+    text = "\n\n".join(label + "\n" + _html_text(row[k]).replace("\r", "\n") for label, k in fields if row.get(k))
+    return _result(row.get("sendReceno", ""), _iso(row.get("sendDay", "")), _html_text(row.get("casrea", "")),
+                   text, _MOEA_BASE + "page/decision-doc-query", notes="案號：" + native_id)
+
+
+# 中選會：前端使用的公開分頁 API，全文仍由官網文章的附件取得
+_CEC_BASE = "https://web.cec.gov.tw/"
+
+
+async def _cec_search(http, keyword, year_from, year_to, doc_number, page):
+    params = {"id": "156", "page": page, "keyword": keyword or doc_number, "webRoute": "central",
+              "beginDate": f"{year_from + 1911}-01-01" if year_from else "",
+              "endDate": f"{year_to + 1911}-12-31" if year_to else ""}
+    r = await http.get(_CEC_BASE + "api/central/article/list", params=params)
+    r.raise_for_status()
+    data = r.json()
+    if str(data.get("code")) != "0" or not isinstance(data.get("data", {}).get("articleList"), list):
+        raise RuntimeError("中選會查詢回應格式不符")
+    data = data["data"]
+    items = [_item(x["directPath"], "", _iso(x.get("beginTime", "")[:8]), x.get("directName", ""))
+             for x in data["articleList"] if x.get("directType") == "005" and re.fullmatch(r"\d+", x.get("directPath", ""))]
+    return _page(data["pages"]["totalCount"], items, page < data["pages"]["totalPage"], _TITLE_ONLY,
+                 "日期為刊登日期", _NO_DOC if keyword and doc_number else "")
+
+
+async def _cec_get(http, native_id):
+    url = _CEC_BASE + "central/article/" + native_id
+    r = await http.get(url)
+    r.raise_for_status()
+    soup = _soup(r)
+    title = _text(soup.select_one("h2.title"))
+    a = soup.select_one('a[href^="https://web.cec.gov.tw/api/file/"][href$=".pdf"]')
+    if not title or a is None:
+        raise ValueError("中選會未回傳決定書文章或 PDF 附件")
+    text = await _pdf_text(http, a["href"])
+    return _result(_doc_no(text), _signed(text), title, text, url, a["href"])
+
+
+# 環境部：公開 DataTables API；一次只請求使用者指定的一頁
+_MOENV_BASE = "https://aamis-web.moenv.gov.tw/"
+
+
+async def _moenv_query(http, conditions, page=1):
+    data = {"draw": "1", "start": str((page - 1) * 10), "length": "10",
+            "order[0][column]": "2", "order[0][dir]": "desc", **conditions}
+    for i, key in enumerate(("", "name", "date", "docNo", "caseNo", "")):
+        data.update({f"columns[{i}][data]": key, f"columns[{i}][name]": "",
+                     f"columns[{i}][searchable]": "true", f"columns[{i}][orderable]": "true",
+                     f"columns[{i}][search][value]": "", f"columns[{i}][search][regex]": "false"})
+    r = await http.post(_MOENV_BASE + "Search/Decision/Read", data=data)
+    r.raise_for_status()
+    result = r.json()
+    if not isinstance(result.get("data"), list) or "recordsFiltered" not in result:
+        raise RuntimeError("環境部公開查詢回應格式不符")
+    return result
+
+
+async def _moenv_search(http, keyword, year_from, year_to, doc_number, page):
+    if not 1 <= page <= 30:
+        raise ValueError("環境部每次查詢最多 300 筆（30 頁），請縮小條件")
+    today = datetime.now().date()
+    start = year_from or today.year - 1911
+    data = await _moenv_query(http, {"Keyword": keyword, "DocNo": _number(doc_number),
+        "DateStartString": f"{start}/01/01", "DateEndString": f"{year_to}/12/31" if year_to else
+        f"{today.year - 1911}/{today.month:02d}/{today.day:02d}"}, page)
+    rows = [_item(x["caseNo"], x.get("docNo", ""), _iso(x.get("date", "")),
+                  _html_text(x.get("subject") or x.get("name", ""))) for x in data["data"]]
+    return _page(data["recordsFiltered"], rows, page * 10 < min(data["recordsFiltered"], 300),
+                 "未指定起始年度時依官網預設查本年度；官網每次查詢最多 300 筆，請縮小條件")
+
+
+async def _moenv_get(http, native_id):
+    data = await _moenv_query(http, {"CaseNo": native_id})
+    row = next((x for x in data["data"] if x.get("caseNo") == native_id), None)
+    if row is None:
+        raise LookupError(native_id)
+    fields = (("訴願人", "name"), ("原處分機關", "punishOrgName"), ("案由", "subject"),
+              ("主文", "summary"), ("事實", "fact"), ("理由", "reason"))
+    text = "\n\n".join(label + "\n" + _html_text(row[k]) for label, k in fields if row.get(k))
+    file_id = row.get("fileId", "")
+    pdf = _MOENV_BASE + "File/Download/" + file_id if re.fullmatch(r"[a-fA-F0-9-]{36}", file_id) else ""
+    return _result(row.get("docNo", ""), _iso(row.get("date", "")), _html_text(row.get("subject", "")),
+                   text, _MOENV_BASE + "Search/Decision", pdf, "案號：" + native_id)
+
+
+# 勞動部：公開語音驗證功能傳回 SpeechSynthesis 所需的數字字串
+_MOL_BASE = "https://appealweb.mol.gov.tw/Appeal/"
+
+
+async def _mol_search(http, keyword, year_from, year_to, doc_number, page):
+    async with _client() as client:
+        r = await client.get(_MOL_BASE + "AppealCaseDecision")
+        r.raise_for_status()
+        data = _form(_soup(r))
+        r = await client.get(_MOL_BASE + "GetValidateCode")
+        r.raise_for_status()
+        r = await client.get(_MOL_BASE + "GetVoice")
+        r.raise_for_status()
+        code = r.json()
+        if not isinstance(code, str) or not re.fullmatch(r"[A-Za-z0-9]{4,8}", code):
+            raise RuntimeError("勞動部語音驗證碼格式不符，無法完成查詢")
+        year = year_to or year_from
+        data.update(validCode=code, contentPublic1=keyword, outgoingWordNum=_number(doc_number),
+                    caseYear=str(year) if year else "", pageNumber=str(page), pageSize="10")
+        r = await client.get(_MOL_BASE + "AppealCaseDecisionResult", params=data)
+        r.raise_for_status()
+        soup = _soup(r)
+        if page > 1:
+            data = _form(soup, "#main-form")
+            data.update(pageNumber=str(page), pageSize="10")
+            r = await client.get(_MOL_BASE + "AppealCaseDecisionResult", params=data)
+            r.raise_for_status()
+            soup = _soup(r)
+    table = soup.select_one("main table")
+    count = re.search(r"共\s*([\d,]+)\s*筆", _text(soup))
+    if table is None or count is None:
+        raise RuntimeError("勞動部未回傳可確認的查詢結果，驗證可能未完成")
+    rows = []
+    for tr in table.select("tbody tr"):
+        a = tr.select_one('a[href*="AppealCaseDecisionContent?caseId="]')
+        cells = tr.find_all("td")
+        if a and len(cells) >= 5:
+            rid = parse_qs(urlparse(a["href"]).query)["caseId"][0]
+            rows.append(_item(rid, _text(cells[3]), _iso(_text(cells[2])), _text(cells[4])))
+    total = int(count.group(1).replace(",", ""))
+    return _page(total, rows, page * 10 < total, "列表日期為發文日期",
+                 f"此來源只查單一年度，本次查 {year} 年" if year_from and year_to and year_from != year_to else "")
+
+
+async def _mol_get(http, native_id):
+    url = _MOL_BASE + "AppealCaseDecisionContent?caseId=" + native_id
+    r = await http.get(url)
+    r.raise_for_status()
+    node = _soup(r).select_one("main .con-flow")
+    text = _html_text(str(node)) if node else ""
+    if "訴願決定書" not in text:
+        raise ValueError("勞動部未回傳決定書內容，可能是驗證頁或格式已變更")
+    return _result(_doc_no(text), _signed(text), _cause(text), text, url)
+
+
+# 文化部：一般訪客的 SPA 會自行取得公開站台 token；擷取該次前端 API 回應
+_MOC_BASE = "https://appeal.moc.gov.tw/home/zh-tw/mocappeal"
+_MOC_API = "https://themedata.culture.tw/api/cms/mocappeal"
+
+
+def _epoch_date(value):
+    return datetime.fromtimestamp(value / 1000, timezone(timedelta(hours=8))).date().isoformat() if value else ""
+
+
+async def _moc_search(http, keyword, year_from, year_to, doc_number, page):
+    query = {"search": " ".join(x for x in (keyword, doc_number) if x)}
+    # 年度與字號未證實是獨立欄位；不假裝 API 已套用。
+    params = {"limit": 10, "offset": (page - 1) * 10, "query": json.dumps(query, ensure_ascii=False, separators=(",", ":")),
+              "sort": "issueDate", "order": "desc"}
+    data = await public_browser.response_json(_MOC_BASE + "?" + urlencode(params), _MOC_API + "?")
+    if not isinstance(data.get("rows"), list) or "total" not in data:
+        raise RuntimeError("文化部查詢回應格式不符")
+    rows = [_item(str(x["id"]), "", _epoch_date(x.get("issueDate")), x.get("title", "")) for x in data["rows"]]
+    return _page(data["total"], rows, page * 10 < data["total"], "日期為刊登日期；字號併入全文關鍵字查詢",
+                 _NO_YEAR if year_from or year_to else "")
+
+
+async def _moc_get(http, native_id):
+    url = _MOC_BASE + "/" + native_id
+    row = await public_browser.response_json(url, _MOC_API + "/" + native_id)
+    if not row.get("decideDocumentNo") or not row.get("reason"):
+        raise ValueError("文化部公開 API 未回傳決定書內容")
+    fields = (("訴願人姓氏", "appellantSurname"), ("訴願人", "appellant"),
+              ("訴願人二姓氏", "appellant2Surname"), ("訴願人二", "appellant2"),
+              ("訴願人三姓氏", "appellant3Surname"), ("訴願人三", "appellant3"),
+              ("法定代理人", "legalRepresentative"), ("代表人", "representative"), ("代理人", "appellantProxy"),
+              ("案由", "description"), ("主文", "content"), ("事實", "fact"), ("理由", "reason"),
+              ("主任委員", "chairperson"), ("委員", "commissioner"), ("附記", "teching"))
+    text = "\n\n".join(label + "\n" + _html_text(row[k]) for label, k in fields if row.get(k))
+    return _result(row.get("decideDocumentNo", ""), _epoch_date(row.get("decideDate")),
+                   row.get("title", ""), text, url)
+
+
+# 基隆市：標題為案號；不下載其他結果的 PDF 做全文檢索
+_KL_BASE = "https://www.klcg.gov.tw/"
+
+
+async def _keelung_search(http, keyword, year_from, year_to, doc_number, page):
+    r = await http.get(_KL_BASE + "tw/klcg1/2669.html", params={"q_stitle": doc_number or keyword,
+                       "q_xbody": "", "nowPage": page, "pageSize": 10})
+    r.raise_for_status()
+    soup = _soup(r)
+    count = re.search(r"共\s*(\d+)\s*筆資料", _text(soup))
+    if not count:
+        raise RuntimeError("基隆市查詢頁格式不符")
+    rows = []
+    for a in soup.select('a[href*="/2669-"]'):
+        match = re.search(r"/2669-(\d+)\.html", a["href"])
+        if match:
+            rows.append(_item(match.group(1), _text(a), "", _text(a)))
+    total = int(count.group(1))
+    return _page(total, rows, page * 10 < total, _TITLE_ONLY + "（多為案號）",
+                 _NO_YEAR if year_from or year_to else "",
+                 "本次以字號查標題，keyword 未套用" if keyword and doc_number else "")
+
+
+async def _keelung_get(http, native_id):
+    url = _KL_BASE + "tw/klcg1/2669-" + native_id + ".html"
+    r = await http.get(url)
+    r.raise_for_status()
+    soup = _soup(r)
+    a = soup.select_one('a[href^="/wSite/public/Attachment/"][href$=".pdf"]')
+    if a is None:
+        raise ValueError("基隆市未回傳決定書 PDF 附件")
+    pdf = urljoin(_KL_BASE, a["href"])
+    text = await _pdf_text(http, pdf)
+    return _result(_doc_no(text), _signed(text), _cause(text), text, url, pdf)
+
+
+# 人事總處：每次僅讀一頁標題並比對；不抓完整清單
+_DGPA_BASE = "https://www.dgpa.gov.tw/"
+
+
+async def _dgpa_search(http, keyword, year_from, year_to, doc_number, page):
+    r = await http.get(_DGPA_BASE + "informationlist", params={"uid": 130, "page": page})
+    r.raise_for_status()
+    soup = _soup(r)
+    count = re.search(r"共\s*(\d+)\s*筆", _text(soup))
+    if count is None:
+        raise RuntimeError("人事總處查詢頁格式不符")
+    rows = []
+    for a in soup.select('a[href^="information?uid=130&pid="]'):
+        title = _text(a)
+        day = re.search(r"\d{3}\.\d{2}\.\d{2}", title)
+        rid = parse_qs(urlparse(a["href"]).query)["pid"][0]
+        rows.append(_item(rid, "", _iso(day.group()) if day else "", title))
+    hits = _local(rows, keyword, year_from, year_to, doc_number, 1)["items"]
+    total = int(count.group(1))
+    return _page(total, hits, page * 10 < total,
+                 "只比對指定頁面的標題及刊登年度；總筆數為未篩選清單筆數，空頁不代表其他頁沒有符合資料")
+
+
+async def _dgpa_get(http, native_id):
+    url = _DGPA_BASE + "information?uid=130&pid=" + native_id
+    r = await http.get(url)
+    r.raise_for_status()
+    soup = _soup(r)
+    a = soup.select_one('a[href^="/FileConversion?"][href*=".odt"]')
+    if a is None:
+        raise ValueError("人事總處未回傳決定書 ODT 附件")
+    attachment = urljoin(_DGPA_BASE, a["href"])
+    r = await http.get(attachment)
+    r.raise_for_status()
+    if not r.content.startswith(b"PK"):
+        raise ValueError("人事總處未回傳 ODT，可能是錯誤頁")
+    text = _office_text(r.content)
+    if not text:
+        raise RuntimeError("人事總處附件無法擷取文字")
+    return {**_result(_doc_no(text), _signed(text), _text(a), text, url), "attachment_url": attachment}
+
+
+# 內政部／衛福部：每次新工作階段，本機 OCR 最多辨識兩次
+_MOI_BASE = "https://aarc.moi.gov.tw/Decision/"
+_MOHW_BASE = "https://service.mohw.gov.tw/AppealSearch/"
+
+
+async def _captcha_search(key, http, keyword, year_from, year_to, doc_number, page):
+    from mcp_server.tools.public_captcha import recognize
+
+    moi = key == "moi"
+    base = _MOI_BASE if moi else _MOHW_BASE
+    year = datetime.now().year - 1911
+    start, end = year_from or year_to or year, year_to or year_from or year
+    notes = [f"查詢民國 {start} 至 {end} 年；未指定年度時限本年度"]
+    if moi and end != start:
+        raise ValueError("內政部官網一次回傳全部符合清單，請指定單一年度以限制查詢範圍")
+    async with _client() as client:
+        for attempt in range(2):
+            if attempt:
+                await asyncio.sleep(1)
+            r = await client.get(base)
+            r.raise_for_status()
+            soup = _soup(r)
+            data = _form(soup)
+            image = await client.get(base + ("VerificationCode" if moi else "ModCaptcha/JpegImage.ashx"))
+            image.raise_for_status()
+            code = await recognize(image.content)
+            if moi:
+                data.update(Captcha=code, FullTextKw=keyword, IsIncludeFullTextKw="True",
+                            DecisionNumber=_number(doc_number), StrStartDate=f"{start}/01/01", StrEndDate=f"{end}/12/31",
+                            CaseTypeArray=[x["value"] for x in soup.select('input[name=CaseTypeArray][checked]')])
+            else:
+                data.update(TBOXCaptcha=code, TXTKeyword1=keyword, TXTAppealNo=_number(doc_number),
+                            TXTSDate=f"{start}/01/01", TXTEDate=f"{end}/12/31", send="送出")
+            r = await client.post(base + ("Search" if moi else "SearchResult.aspx"), data=data)
+            r.raise_for_status()
+            soup = _soup(r)
+            # 衛福部驗證失敗也會顯示「查無資料」，不可當成真的零筆。
+            valid = soup.select_one("table.appeals_table" if moi else "table tbody")
+            if valid is not None:
+                break
+        else:
+            raise RuntimeError("官網未回傳可確認的結果表格；兩次驗證未完成或結果為空，不能判定查無資料")
+        if not moi and page > 1:
+            data = _form(soup)
+            data.update({"ctl00$content$ucPage$txtPageSelector": str(page), "ctl00$content$ucPage$btn_go": "go"})
+            r = await client.post(base + "SearchResult.aspx", data=data)
+            r.raise_for_status()
+            soup = _soup(r)
+    table = soup.select_one("table.appeals_table" if moi else "table")
+    if table is None:
+        raise RuntimeError("官網分頁未回傳結果表格")
+    rows = []
+    for tr in table.select("tbody tr"):
+        cells = tr.find_all("td")
+        a = tr.select_one('a[href*="Detail?desid="]' if moi else 'a[href*="AppNo="][href*="type=odt"]')
+        if a and len(cells) >= 5:
+            args = parse_qs(urlparse(a["href"]).query)
+            rid = args["desid" if moi else "AppNo"][0]
+            rows.append(_item(rid, _text(cells[3 if moi else 2]), _iso(_text(cells[2 if moi else 3])),
+                              _text(cells[4 if moi else 1])))
+    if moi:
+        items, more = _paged(rows, page)
+        return _page(len(rows), items, more, *notes)
+    count = re.search(r"共\s*(\d+)\s*筆資料", _text(soup))
+    if count is None:
+        raise RuntimeError("衛福部未回傳可確認的筆數")
+    total = int(count.group(1))
+    return _page(total, rows, page * 10 < total, *notes)
+
+
+async def _moi_get(http, native_id):
+    url = _MOI_BASE + "Detail?" + urlencode({"desid": native_id})
+    r = await http.get(url)
+    r.raise_for_status()
+    node = _soup(r).select_one(".page_pdf")
+    text = _html_text(str(node)) if node else ""
+    if "訴願" not in text or "主文" not in text:
+        raise ValueError("內政部未回傳決定書內容，可能是驗證頁或格式已變更")
+    return _result(_doc_no(text), _signed(text), _cause(text), text, url)
+
+
+async def _mohw_get(http, native_id):
+    url = _MOHW_BASE + "AppealDownload.aspx?" + urlencode({"AppNo": native_id, "type": "odt"})
+    r = await http.get(url)
+    r.raise_for_status()
+    if not r.content.startswith(b"PK"):
+        raise ValueError("衛福部未回傳 ODT，可能是驗證頁或錯誤頁")
+    text = _office_text(r.content)
+    if not text:
+        raise RuntimeError("衛福部未回傳可讀取的 ODT 決定書")
+    return {**_result(_doc_no(text), _signed(text), _cause(text), text, _MOHW_BASE), "attachment_url": url}
+
+
 def _register(key: str, label: str, agency: str, aliases: tuple[str, ...], id_pattern: str, search, get):
     """補上 id 前綴、機關、類別；get 先驗證原站識別碼格式（不合格式不組網址）。"""
 
@@ -1046,6 +1544,19 @@ def _register(key: str, label: str, agency: str, aliases: tuple[str, ...], id_pa
 
 
 SOURCES = dict([
+    _register("moi", "內政部訴願決定", "內政部", ("內政部",), r"[A-Za-z0-9+/]{11}=", partial(_captcha_search, "moi"), _moi_get),
+    _register("mohw", "衛福部訴願決定", "衛生福利部", ("衛福部", "衛生福利部"), r"[0-9]{10}", partial(_captcha_search, "mohw"), _mohw_get),
+    _register("moenv", "環境部訴願決定", "環境部", ("環境部", "環保署"), r"[0-9]{11}[A-Z]{2}[0-9]{2}", _moenv_search, _moenv_get),
+    _register("mol", "勞動部訴願決定", "勞動部", ("勞動部", "勞委會"), r"[0-9]{1,10}", _mol_search, _mol_get),
+    _register("moc", "文化部訴願決定", "文化部", ("文化部",), r"[0-9]{1,10}", _moc_search, _moc_get),
+    _register("keelung", "基隆市訴願決定", "基隆市政府", ("基隆", "基隆市", "基隆市政府"), r"[0-9]{1,10}", _keelung_search, _keelung_get),
+    _register("dgpa", "人事總處訴願決定", "行政院人事行政總處", ("人事總處", "行政院人事行政總處"), r"[0-9]{1,10}", _dgpa_search, _dgpa_get),
+    _register("moea", "經濟部訴願決定", "經濟部", ("經濟部",), r"[A-Z]\d{9}", _moea_search, _moea_get),
+    _register("cec", "中選會訴願決定", "中央選舉委員會", ("中選會", "中央選舉委員會"), r"\d{1,10}", _cec_search, _cec_get),
+    _register("moa", "農業部訴願決定", "農業部", ("農業部", "農委會"), r"\d{1,10}",
+              partial(_education_agriculture_search, "moa"), _moa_get),
+    _register("moe", "教育部訴願決定", "教育部", ("教育部",), r"\d{9}",
+              partial(_education_agriculture_search, "moe"), _moe_get),
     _register("taichung", "臺中市政府訴願決定", "臺中市政府",
               ("臺中市政府", "臺中市", "台中市", "臺中", "台中", "中市"), r"\d{5,10}", _tc_search, _tc_get),
     _register("taipei", "臺北市政府訴願決定", "臺北市政府",

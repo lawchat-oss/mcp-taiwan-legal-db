@@ -229,7 +229,7 @@ async def test_rhythm_search_posts_then_pages_with_query_guid():
 
 
 async def test_rhythm_get_bundle_caps_files(monkeypatch):
-    monkeypatch.setattr(ap, "pdf_to_text", lambda blob: blob.decode())
+    monkeypatch.setattr(ap, "pdf_to_text", lambda blob: blob.removeprefix(b"%PDF").decode())
     links = "".join(
         f'<li data-index="{i}"><a href="https://ws/Download.ashx?u={_u(f"/001/Upload/1/relfile/12642/256927/{i}.pdf")}'
         f'&amp;n={_u(f"115000{i}-決定書-張○{i}.pdf")}">pdf</a></li>' for i in range(7))
@@ -237,7 +237,7 @@ async def test_rhythm_get_bundle_caps_files(monkeypatch):
 
     def handler(request):
         if "Download.ashx" in str(request.url):
-            return httpx.Response(200, content="訴願人：張○○ 中華民國115年8月25日".encode())
+            return httpx.Response(200, content=b"%PDF" + "訴願人：張○○ 中華民國115年8月25日".encode())
         return _html(f'<div id="CCMS_Content"><h3>115年第4次訴願審議委員會決定書</h3><ul>{links}</ul>{other}</div>')
 
     cfg = ap._Rhythm("https://www.cyhg.gov.tw/", "1220", "12642")  # 不走舊版 TLS，才能用 MockTransport

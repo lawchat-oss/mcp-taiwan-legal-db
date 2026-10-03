@@ -27,7 +27,6 @@ from mcp_server.tools.pdf_text import pdf_to_text
 logger = logging.getLogger(__name__)
 
 BASE = "https://cons.judicial.gov.tw"
-MAX_TEXT = 60000
 _PAGE_TTL = 86400  # 卷宗頁 6–8 MB，同一案一天內只抓一次
 
 # 憲判字頁 JSON 的附件分組；openAtt 的名稱以頁面上的標題為準，這裡只是後備
@@ -245,7 +244,7 @@ class ConstitutionalDocketClient:
         if words:
             result["note"] += "關鍵字比對的是官方擷取的文字（無標點），只列出含全部關鍵字的文件。"
         if data["petition_text"]:
-            result["petition_text"] = data["petition_text"][:MAX_TEXT]
+            result["petition_text"] = data["petition_text"]
         return result
 
     async def document(self, document_id: str) -> dict:
@@ -264,7 +263,7 @@ class ConstitutionalDocketClient:
             return error_response("document_id 應為 get_constitutional_case_file 回傳的文件 id（數字）或 news:…")
         url = f"{BASE}/download/download.aspx?id={document_id}"
         cached = await self.cache.get_judgment(f"consdoc:{document_id}")
-        if cached:
+        if cached and not cached.get("full_text_truncated"):
             return {"success": True, "cached": True, **cached}
         try:
             r = await self.http.get(url)
@@ -275,7 +274,7 @@ class ConstitutionalDocketClient:
         if not text:
             return {"success": True, "document_id": document_id, "full_text": "", "pdf_url": url,
                     "note": "這份文件無法擷取文字（不是 PDF 或為純影像），請開 pdf_url 閱讀。"}
-        data = {"document_id": document_id, "full_text": text[:MAX_TEXT], "full_text_truncated": len(text) > MAX_TEXT,
+        data = {"document_id": document_id, "full_text": text, "full_text_truncated": False,
                 "pdf_url": url}
         await self.cache.set_judgment(f"consdoc:{document_id}", data, source="constitutional_docket")
         return {"success": True, "cached": False, **data}

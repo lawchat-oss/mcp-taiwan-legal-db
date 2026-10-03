@@ -58,18 +58,19 @@ def test_resolve_sources_aliases():
     assert set(orx.resolve_sources("條約")) == {"moj_treaty", "mofa"}
     assert orx.resolve_sources("證交所 櫃買中心 期交所") == ["twse", "tpex", "taifex"]
     assert orx.resolve_sources("桃園") == ["taoyuan"] and orx.resolve_sources("馬祖") == ["lienchiang"]
-    assert orx.resolve_sources("雲林") is None  # Cloudflare 擋住，沒有收
+    assert orx.resolve_sources("雲林") == ["yunlin"]
     assert orx.resolve_sources("") == list(S)
 
 
-def test_shape_filters_article_and_truncates(monkeypatch):
-    data = {"title": "X", "articles": [{"number": "1", "content": "a" * 6}, {"number": "2", "content": "b" * 6}]}
+def test_shape_filters_article_and_keeps_complete_text():
+    data = {"title": "X", "articles": [{"number": "1", "content": "a" * 60001}, {"number": "2", "content": "b" * 6}]}
     assert orx._shape(data, "第二條")["articles"] == [{"number": "2", "content": "bbbbbb"}]
     with pytest.raises(LookupError):
         orx._shape(data, "3")
-    monkeypatch.setattr(orx, "MAX_TEXT", 10)
-    capped = orx._shape(data, "")
-    assert capped["truncated"] and [a["number"] for a in capped["articles"]] == ["1"] and "article_no" in capped["note"]
+    complete = orx._shape(data, "")
+    assert not complete["truncated"] and complete["articles"] == data["articles"]
+    raw = "字" * 100001
+    assert orx._shape({"full_text": raw}, "")["full_text"] == raw
     full = orx._shape({"title": "T", "full_text": "前言\n第一條 甲。\n第二條 乙。"}, "2")
     assert full["articles"] == [{"number": "2", "content": "乙。"}] and "full_text" not in full
     with pytest.raises(LookupError, match="未分條"):

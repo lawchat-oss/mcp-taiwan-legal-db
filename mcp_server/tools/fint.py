@@ -265,7 +265,7 @@ class PrecedentClient:
     async def get(self, precedent_id: str) -> dict:
         cache_key = f"fint:v2:{precedent_id}"  # v2 起有「廢」標示（不再援用），舊快取沒有
         cached = await self.cache.get_judgment(cache_key)
-        if cached:
+        if cached and not cached.get("full_text_truncated"):
             return {"success": True, "cached": True, **cached}
         try:
             data = await get(self.http, precedent_id)
@@ -274,6 +274,6 @@ class PrecedentClient:
         except httpx.HTTPError as e:
             return error_response(f"司法院法學資料檢索系統連線失敗：{type(e).__name__}: {e}")
         full = data["full_text"]
-        data = {"id": precedent_id, **data, "full_text": full[:20000], "full_text_truncated": len(full) > 20000}
+        data = {"id": precedent_id, **data, "full_text": full, "full_text_truncated": False}
         await self.cache.set_judgment(cache_key, data, source="fint", ttl=7 * 86400)  # 判例可能事後不再援用
         return {"success": True, "cached": False, **data}

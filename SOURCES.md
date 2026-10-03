@@ -69,6 +69,12 @@ All data in this project is sourced from public databases run by Taiwan governme
 | 外交部 | https://law.mofa.gov.tw/ | 行政規則（指名才查） |
 | 國軍退除役官兵輔導委員會 | https://law.vac.gov.tw/vaclaw/ | 行政規則（指名才查） |
 | 核能安全委員會 | https://erss.nusc.gov.tw/law/ | 行政指導、行政規則（指名才查） |
+| NCC | https://ncclaw.ncc.gov.tw/FINT/ | 個別函釋；指名 `NCC` 才查。HTTP 優先，遇驗證使用瀏覽器；不推論效力 |
+| 客家委員會 | https://law.hakka.gov.tw/ | 行政規則；補現有 TWCA 2023 中繼憑證，保留 TLS 驗證；指名才查 |
+| 僑務委員會 | https://law.ocac.gov.tw/law/ | 正確公開入口是 `/law/`；行政規則，指名才查 |
+| 運動部 | https://law.sports.gov.tw/ | 行政規則；HTTP 優先，必要時 Playwright；指名才查 |
+| 財政部關務署 | https://web.customs.gov.tw/multiplehtml/41 | 新頒釋函；單次 CSRF 表單查一頁標題、按需全文；`關務署` 同時查既有財政部主管法規系統 |
+| 陸委會主站 | https://www.mac.gov.tw/Content_List.aspx?n=8E8FA34452E8DBC2 | 僅廣告規範類別的函與參考意見；HTTP／瀏覽器；`陸委會` 同時查既有主管法規系統，不代表全部主站函文 |
 | 國家發展委員會 | https://theme.ndc.gov.tw/lawout/ | 行政規則（指名才查） |
 | 行政院人事行政總處 | https://law.dgpa.gov.tw/ | 人事法令解釋 |
 | 行政院消費者保護處 | https://www.ey.gov.tw/Page/B68C1CA8857302A2 | 消費者保護法函釋（只比對標題與摘要） |
@@ -82,7 +88,7 @@ All data in this project is sourced from public databases run by Taiwan governme
 
 ## 6. 訴願決定與準司法決定 / Administrative Appeals and Quasi-judicial Decisions
 
-官網公開的決定書照原樣提供：多數機關已遮蔽當事人姓名，部分舊案（行政院 108 年以前收辦、法務部約 112 年以前）與原民會的決定書官網未遮蔽，本工具不另外遮蔽。經濟部、農業部、教育部的訴願網站尚未收錄。需要驗證碼或 Cloudflare 驗證的網站（勞動部、財政部、內政部、衛福部、臺南市的訴願查詢，醫事懲戒、NCC）未收錄，也不嘗試繞過。
+官網公開的決定書照原樣提供：多數機關已遮蔽當事人姓名，部分舊案（行政院 108 年以前收辦、法務部約 112 年以前）與原民會的決定書官網未遮蔽，本工具不另外遮蔽。新增來源僅供使用者觸發的公開免登入查詢；必要時以全新 Playwright 工作階段、CSRF 表單或本機 OCR 完成驗證。沒有使用個人登入狀態，也不遍歷所有分頁。驗證未完成回報錯誤，不當成查無資料。內政部與衛福部需安裝 `[captcha]` 額外依賴；文化部需 Chromium。
 
 ### 預設來源與準司法機關
 
@@ -98,12 +104,23 @@ All data in this project is sourced from public databases run by Taiwan governme
 | 金管會保險局 | https://www.ib.gov.tw/ch/home.jsp?id=42&parentpath=0,2 | 裁罰案件 |
 | 行政院公共工程委員會 | https://web.pcc.gov.tw/piat/piaq/index | 採購申訴審議判斷（須指定才查） |
 | 監察院 | https://www.cy.gov.tw/CyBsBox.aspx?CSN=1&n=133&sms=0 | 調查報告、糾正案、彈劾案、糾舉案（須指定才查） |
+| 衛福部醫事懲戒 | https://ma.mohw.gov.tw/Accessibility/DISSearch/MASearchDIS | 目前上架公告（預設西醫師）；公開表單無須前端驗證碼，只取官方主機 PDF；掃描檔沒有文字全文。須指定 `醫事懲戒` |
 | 法務部律師查詢系統 | https://lawyerbc.moj.gov.tw/ | 律師懲戒、懲戒覆審決議（須指定才查） |
 
 ### 各部會訴願決定（須指定才查）
 
 | 機關 / Agency | URL |
 |---|---|
+| 經濟部 | https://eportal2.moea.gov.tw/EE120/page/decision-doc-query （公開 CSRF + JSON API，固定 `isOpen=true`；本年度及前五年度） |
+| 農業部 | https://appeal.moa.gov.tw/Mondel/LaKm/LaKmQry.aspx （WebForms；最多前五頁，總數為估計，列表日期是登錄日） |
+| 教育部 | https://appeal.moe.gov.tw/hope_search.aspx （WebForms；最近二年、最多前五頁，不支援年度篩選） |
+| 文化部 | https://appeal.moc.gov.tw/home/zh-tw/mocappeal （全新 Playwright 工作階段取得前端公開 API 回應；列表日期是刊登日） |
+| 環境部 | https://aamis-web.moenv.gov.tw/Search/Decision （公開 JSON 查詢；預設本年度，上限 300 筆） |
+| 勞動部 | https://appealweb.mol.gov.tw/Appeal/AppealCaseDecision （公開語音驗證回應；只查單一年度，列表日期是發文日） |
+| 內政部 | https://aarc.moi.gov.tw/Decision/ （本機 OCR 最多兩次；預設本年度、一次限一年度） |
+| 衛福部 | https://service.mohw.gov.tw/AppealSearch/ （本機 OCR 最多兩次；預設本年度、全文 ODT；無法區分驗證失敗的「查無資料」會回報錯誤） |
+| 中央選舉委員會 | https://web.cec.gov.tw/api/central/article/list （公開清單 API 分類 156，文章附 PDF；只比對標題，日期為刊登日） |
+| 人事行政總處 | https://www.dgpa.gov.tw/informationlist?uid=130 （只在指定一頁比對標題，總數是未篩選筆數；全文 ODT；robots.txt 不作排除，僅使用者觸發） |
 | 法務部 | https://www.moj.gov.tw/2204/2645/2686/Lpsimplelist |
 | 外交部 | https://www.mofa.gov.tw/News.aspx?n=1013&sms=229 |
 | 國防部 | https://law.mnd.gov.tw/ |
@@ -133,6 +150,7 @@ All data in this project is sourced from public databases run by Taiwan governme
 | 嘉義縣政府 | https://www.cyhg.gov.tw/News.aspx?n=1220&sms=12642 （伺服器使用過短的 DH 金鑰，本工具對此站放寬 OpenSSL 安全等級） |
 | 宜蘭縣政府 | https://www.e-land.gov.tw/OpenData_Default.aspx?n=9929 |
 | 新竹縣政府 | https://gdd.hsinchu.gov.tw/News.aspx?n=520&sms=8965 |
+| 基隆市政府 | https://www.klcg.gov.tw/tw/klcg1/2669.html （標題多為案號，全文 PDF；不做附件全文搜尋） |
 
 ## 7. 立法院 / Legislative Yuan
 
@@ -141,6 +159,7 @@ All data in this project is sourced from public databases run by Taiwan governme
 | 立法院法律系統 | https://lis.ly.gov.tw/lglawc/lglawkm | 各法律之法條沿革：歷次制定、修正之條文與立法理由（民國 59 年以後之修正附理由）；最近一次修正的立法歷程與公報頁 PDF。伺服器需要舊式 TLS 重新協商 |
 | 立法院議事暨公報資訊網 | https://ppg.ly.gov.tw/ppg/ | 議案（含審查中草案與關係文書）、立法院公報。robots.txt 不允許爬蟲；僅使用者觸發的單次查詢 |
 | 行政院公報資訊網 | https://gazette.nat.gov.tw/egFront/ | 法規命令訂定、修正草案預告 |
+| JOIN 公共政策網路參與平臺 | https://join.gov.tw/policies/ | `kind="join"` 補法律草案預告；`pending`／`closed` 是諮詢狀態，不是法律效力。單頁公開 API、預告內文、一份選定的草案／對照表 PDF；其他附件提供連結 |
 
 ## 8. 統計與量刑 / Statistics and Sentencing
 
@@ -163,6 +182,7 @@ All data in this project is sourced from public databases run by Taiwan governme
 | 政府研究資訊系統 GRB | https://www.grb.gov.tw/ | 政府補助研究計畫書目與摘要（成果報告下載需在官網完成驗證，只給連結） |
 | 中央研究院法律學研究所 | https://www.iias.sinica.edu.tw/publication_list/9 | 中研院法學期刊全文 |
 | 國立政治大學法學院 | http://review.law.nccu.edu.tw/zh_tw/articles | 政大法學評論全文（站方 HTTPS 憑證過期，以 HTTP 連線） |
+| 國立臺灣大學法律學院 | https://www.law.ntu.edu.tw/center/ | 臺大法學論叢：由國圖書目定位一卷一頁目錄與該期，只取明確標示全文／定稿的 PDF；其餘只回摘要，不遍歷歷年期刊 |
 
 ## 10. 其他規範 / Local Regulations, Treaties and Exchange Rules
 
@@ -191,8 +211,9 @@ All data in this project is sourced from public databases run by Taiwan governme
 | 南投縣 | https://glrs.nantou.gov.tw/ |
 | 花蓮縣 | https://glrs.hl.gov.tw/glrsout/ |
 | 連江縣 | https://law.matsu.gov.tw/ |
+| 雲林縣 | https://law.yunlin.gov.tw/ |
 
-雲林縣的法規系統有 Cloudflare 驗證頁，無法自動連線，未收錄。
+雲林縣採 HTTP 優先、遇驗證時以全新 Playwright 工作階段讀取；逾時或挑戰頁回報失敗，不當成查無法規。
 
 ### 條約協定與交易所規章
 
@@ -221,3 +242,38 @@ Judgments, statutes and regulations (including local ones), Constitutional Court
 
 The structured packaging (JSON data files, HTML parsing, field normalization)
 is released under [CC0 1.0](DATA_LICENSE) by LawChat.
+
+
+## 2026-10-03–04 來源覆蓋評估 / Source audit
+
+[逐項實測、網址、失敗步驟與 healthcheck 紀錄](docs/source-audit-2026-10-03.json)。原交接的件數不代表現況，本次未做全站盤點。新增 21 個來源／全文入口：6 個函釋／行政規則、11 個訴願、醫事懲戒、雲林自治法規、JOIN 法律草案及臺大法學論叢全文定位。函釋與決定的預設來源未擴張，新增者須指名；開放期刊加入臺大，地方法規加入雲林。醫事懲戒實測為掃描 PDF（THIN），其餘 20 項成功取得文字。
+
+| 交接項目 | 結果與範圍 |
+|---|---|
+| A1 客委會 | 已實作，補缺漏中繼憑證 |
+| A2 經濟部、農業部、教育部訴願 | 均已實作，官網姓名照原樣 |
+| A3 桃園訴願 | HTTP 讀取中斷，瀏覽器 ERR_CONNECTION_RESET；自治法規系統不等於訴願來源 |
+| A4 文化部訴願 | 已實作，全新瀏覽器擷取公開 SPA API 回應 |
+| A5 sen.judicial.gov.tw | HTTP／瀏覽器在首頁連線逾時；保留既有 intellisen 公開彙總統計 |
+| A6 興大法學 | 瀏覽器曾開首頁，但單篇連線遭拒；HTTP 首頁／單篇皆連線失敗，未完成穩定全文流程，仍可由國圖查書目 |
+| A7 臺大法學論叢 | 部分全文已實作；學術典藏樣本只有書目，法學院官網有可免登入取得的定稿 |
+| A8 JOIN | 已實作法律草案預告，補公報法規命令草案以外的範圍 |
+| A9 關務署 | 已實作新頒釋函，補近期標題檢索與全文 |
+| A10 南投訴願 | 評估後不新增：按會議刊登、多個舊式 DOC，沒有逐案搜尋；需另做 binary DOC 解析與拆案，不能靠遍歷附件補全文搜尋 |
+| A10 基隆、中選會、人事總處訴願 | 均已實作，分別用文章 id、CEC article id、DGPA pid；PDF／ODT |
+| A11 僑委會 | 已實作，正確入口 `/law/` |
+| B1 NCC | 已實作專屬法規查詢系統，可讀個別函復，不限公報公告 |
+| B2 數位部法規系統 | 三種新瀏覽器工作階段仍停在驗證等待頁；未新增。公報只補到依法公告部分，法令異動名稱不能補個別函復 |
+| B3 陸委會主站 | 已實作廣告規範類函文，範圍有限；原主管法規系統保留 |
+| B4 環境部訴願 | 已實作新版公開 API，無須舊站挑戰頁 |
+| B5 運動部、B6 雲林 | 均已實作；HTTP 優先、必要時瀏覽器 |
+| B7 健保署 | 已由衛福部函釋系統涵蓋，不重複新增 |
+| C1 勞動部、內政部、衛福部 | 均已實作公開驗證流程；OCR 是額外依賴 |
+| C1 財政部訴願 | 官方連結的 webjop 入口在查詢表單出現前即連線中斷，瀏覽器亦 reset；稅務函釋不能代替訴願全文 |
+| C1 臺南訴願 | 圖片辨識、容許截斷 JPEG 解碼、瀏覽器截圖 OCR 均未穩定完成驗證；未新增 |
+| C2 醫事懲戒 | 公開查詢已實作，驗證僅前端；實測 PDF 是掃描檔，只能提供官方 PDF |
+| C2 NDLTD | 已通過公開驗證並取得書目／摘要；穩定 handle 須逐筆開啟，評估後未另建書目 adapter。所測全文明確要求會員登入，不處理該功能 |
+| C2 GRB | 既有書目／摘要保留；完整報告頁 HTTP／瀏覽器逾時，未到驗證階段，不能確認免登入下載流程 |
+| C3 勞動力發展署 | 仍導向員工帳號登入，不處理；既有勞動部公開法規保留 |
+
+無須重新決定瀏覽器或驗證碼原則；未新增登入或權限需求。上述限制是本次實測結果，不代表網站永久不可用。

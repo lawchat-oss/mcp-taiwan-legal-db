@@ -48,7 +48,44 @@ def test_resolve_sources():
     assert lit.resolve_sources("") == list(lit.SOURCES)
     assert lit.resolve_sources("司法研究年報、國圖") == ["jirs", "ncl"]
     assert lit.resolve_sources("政大法學評論") == ["journals"]
+    assert lit.resolve_sources("臺大法學論叢") == ["journals"]
     assert lit.resolve_sources("月旦") is None
+
+
+async def test_ntu_pdf_selects_one_issue_and_excludes_abstracts():
+    seen = []
+    def handler(r):
+        seen.append(r.url.path)
+        if "/tag/" in r.url.path:
+            return _html('<a href="/center/index.php/item/1441">第53卷 第4期</a>')
+        return _html('''<div class="itemAttachments">
+          <a title="5304_甲_中文摘要.pdf" href="/center/media/k2/attachments/abstract.pdf">摘要</a>
+          <a title="5304_乙_定稿.pdf" href="/center/media/k2/attachments/full.pdf">定稿</a>
+          <a title="5304_丙.pdf" href="/center/media/k2/attachments/unknown.pdf">不明</a></div>''')
+    async with _client(handler) as http:
+        assert await lit._ntu_pdf(http, {"title": "文章", "volume": "53:4", "authors": ["乙乙"]}) is None
+        # Use a real-length author name to exercise unambiguous author matching.
+        doc = {"title": "5304乙定稿", "volume": "53:4", "authors": ["乙"]}
+        assert (await lit._ntu_pdf(http, doc)).endswith("/full.pdf")
+        doc["title"] = "5304甲中文摘要"
+        assert await lit._ntu_pdf(http, doc) is None
+        count = len(seen)
+        doc["volume"] = "53:../"
+        assert await lit._ntu_pdf(http, doc) is None and len(seen) == count
+
+
+async def test_journals_accepts_ntu_volume_issue(monkeypatch):
+    from unittest.mock import AsyncMock
+    meta = {"title": "強迫勞動", "authors": ["焦興鎧"], "venue": "國立臺灣大學法學論叢", "date": "2024-12",
+            "volume": "53:4", "abstract": "摘要", "source_url": "https://tpl.ncl.edu.tw/"}
+    monkeypatch.setattr(lit, "_ncl_detail", AsyncMock(return_value=(meta, None)))
+    resolve = AsyncMock(return_value="https://www.law.ntu.edu.tw/center/full.pdf")
+    monkeypatch.setitem(lit.JOURNALS, "國立臺灣大學法學論叢", resolve)
+    monkeypatch.setattr(lit, "_pdf_text", AsyncMock(return_value="文章全文"))
+    async with _client(lambda r: pytest.fail("unexpected network")) as http:
+        doc = await lit._journals_get(http, "A12345678")
+    assert doc["full_text"] == "文章全文"
+    resolve.assert_awaited_once()
 
 
 # ── 司法院專題研究報告 ──
@@ -121,8 +158,8 @@ async def test_jirs_get_finds_report_by_title_and_concatenates_chapters(fake_pdf
     assert doc["full_text_truncated"] is False and "note" not in doc
 
 
-async def test_jirs_get_stops_at_text_cap(monkeypatch):
-    monkeypatch.setattr(lit, "pdf_to_text", lambda b: "字" * lit.MAX_FULL_TEXT)
+async def test_jirs_get_reads_all_chapters_without_character_cap(monkeypatch):
+    monkeypatch.setattr(lit, "pdf_to_text", lambda b: "字" * 60001)
     row = JIRS_ROW.format(n=1, title="韓國量刑準則", date="民國 115 年 03 月", author="甲")
 
     def handler(request):
@@ -134,8 +171,8 @@ async def test_jirs_get_stops_at_text_cap(monkeypatch):
 
     async with _client(handler) as http:
         doc = await lit._jirs_get(http, "202603:韓國量刑準則")
-    assert doc["full_text_truncated"] is True and len(doc["full_text"]) == lit.MAX_FULL_TEXT
-    assert "1 章未擷取" in doc["note"]
+    assert doc["full_text_truncated"] is False and doc["full_text"].count("字") == 120002
+    assert "note" not in doc
 
 
 # ── 國家圖書館 期刊論文索引 ──
@@ -274,8 +311,8 @@ async def test_journals_search_restricts_to_journal_titles():
     async with _client(handler) as http:
         group = await lit._journals_search(http, "個人資料", 0, 0, 1)
     q = sent[0]
-    assert [q[f"q[{n}].i"] for n in range(3)] == [*lit.JOURNALS, "個人資料"]
-    assert [q[f"q[{n}].o"] for n in (1, 2)] == ["1", "0"]  # (刊名 OR 刊名) AND 關鍵字
+    assert [q[f"q[{n}].i"] for n in range(len(lit.JOURNALS) + 1)] == [*lit.JOURNALS, "個人資料"]
+    assert [q[f"q[{n}].o"] for n in range(1, len(lit.JOURNALS) + 1)] == ["1"] * (len(lit.JOURNALS) - 1) + ["0"]
     assert group["total"] == 0 and group["source"] == "開放取用法學期刊"
 
 

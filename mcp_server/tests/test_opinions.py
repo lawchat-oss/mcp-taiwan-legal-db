@@ -25,24 +25,21 @@ def test_opinions_after_737_come_from_pdf_text():
 
 
 def test_opinion_document_returns_one_full_opinion():
-    """意見書合計超過安全閥時，可指定單份意見書讀完整全文。"""
+    """可指定單份意見書讀完整全文。"""
     r = cc.get_interpretation("釋字第758號", opinion_document="許宗力")
     assert r["opinions"].startswith("【許大法官宗力提出之不同意見書】")
     assert not r["opinions_truncated"]
     assert "湯德宗" not in r["opinions"]
 
 
-def test_long_single_opinion_can_be_read_in_pages():
-    """單份超過安全閥（釋字 777 號吳陳鐶意見書約 2 萬字）時，用 opinions_offset 續讀，接起來即完整全文。"""
-    first = cc.get_interpretation("釋字第777號", opinion_document="吳陳鐶")
-    assert first["opinions_truncated"] and first["opinions_next_offset"] == cc.HARD_SAFETY_VALVE
-    assert "opinions_offset=15000" in first["opinions"]
-    rest = cc.get_interpretation("釋字第777號", opinion_document="吳陳鐶", opinions_offset=first["opinions_next_offset"])
-    assert not rest["opinions_truncated"] and "opinions_next_offset" not in rest
-    head = first["opinions"][: cc.HARD_SAFETY_VALVE]
-    assert len(head + rest["opinions"]) == first["opinions_full_length"] == rest["opinions_full_length"]
+def test_long_single_opinion_is_complete_and_offset_remains_compatible():
+    full = cc.get_interpretation("釋字第777號", opinion_document="吳陳鐶")
+    assert not full["opinions_truncated"] and "opinions_next_offset" not in full
     wu = next(d for d in cc._bundled_opinions("old/777")["documents"] if "吳大法官陳鐶" in d["title"])
-    assert head + rest["opinions"] == f"【{wu['title']}】\n{wu['text']}"
+    assert full["opinions"] == f"【{wu['title']}】\n{wu['text']}"
+    assert len(full["opinions"]) > 15000
+    rest = cc.get_interpretation("釋字第777號", opinion_document="吳陳鐶", opinions_offset=15000)
+    assert not rest["opinions_truncated"] and rest["opinions"] == full["opinions"][15000:]
 
 
 def test_opinion_document_not_found_gives_hint():

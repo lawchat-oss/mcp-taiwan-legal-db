@@ -32,7 +32,6 @@ PPG = "https://ppg.ly.gov.tw/ppg/"
 GAZETTE = "https://gazette.nat.gov.tw/egFront/"
 LIS_PDF = "https://lis.ly.gov.tw/lgcgi/lypdftxt?xdd!"
 PAGE_SIZE = 20
-MAX_TEXT = 60000
 MAX_PDF_BYTES = 60 * 1024 * 1024  # 一冊公報 PDF 可達 30 MB 以上
 
 BILL_APIS = {"pending": "pending-bills-search", "all": "all-bills", "passed": "three-read-bills-search"}
@@ -245,6 +244,65 @@ async def get_draft(http: httpx.AsyncClient, metaid: str) -> dict:
 # 對外介面
 # ─────────────────────────────────────────────────────────────
 
+# JOIN：補足行政院公報以外的「法律草案預告」；公開前端同一查詢 API
+_JOIN = "https://join.gov.tw/"
+_JOIN_ID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
+
+
+async def search_join(keyword: str, status: str, page: int) -> dict:
+    from mcp_server.tools.agency_interpretations import _session
+    data = {"page": page, "size": 20, "keyword": keyword, "organization": "", "period": "all",
+            "searchType": "finish" if status == "closed" else "nonfinish", "year": "", "searchScope": "Law",
+            "onlyDataTypeBasic": False, "queryMode": "", "enablePeriod": True}
+    async with _session() as http:
+        r = await http.get(_JOIN + "policies/")
+        r.raise_for_status()
+        r = await http.post(_JOIN + "policies/v2/data/list", params={"page": page, "size": 20, "sort": "publishDate,desc"},
+                           json=data, headers={"X-Requested-With": "XMLHttpRequest", "Origin": _JOIN.rstrip("/"),
+                                               "Referer": _JOIN + "policies/"})
+        r.raise_for_status()
+    data = r.json()
+    if not data.get("success") or not isinstance(data.get("result"), list) or "totalResults" not in data:
+        raise ValueError("JOIN 未回傳可確認的查詢結果")
+    items = []
+    for row in data["result"]:
+        rid = row.get("policyUid", "")
+        if not _JOIN_ID.fullmatch(rid) or row.get("dataType") != "Law":
+            raise ValueError("JOIN 法律草案類別或識別碼格式已變更")
+        items.append({"id": "join:" + rid, "title": row.get("policyTitle", ""),
+                      "summary": row.get("policyAbstract", ""), "source_url": _JOIN + "policies/detail/" + rid})
+    return {"kind": "join", "consultation_state": "已結束" if status == "closed" else "進行中",
+            "total": data["totalResults"], "items": items, "has_more": page < data["totalPages"]}
+
+
+async def get_join(http, native: str) -> dict:
+    from mcp_server.tools.agency_interpretations import _html_text
+    from urllib.parse import urljoin
+    if not _JOIN_ID.fullmatch(native):
+        raise LookupError(native)
+    url = _JOIN + "policies/detail/" + native
+    r = await http.get(url)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    body = soup.select_one(".shareMailBody")
+    if body is None:
+        raise LookupError(native)
+    title = soup.select_one(".shareMailSubject")
+    attachments = [{"title": _strip_tags(str(a)), "url": urljoin(_JOIN, a["href"])}
+                   for a in soup.select('.policy-detail a[href^="/attachments/"][href*="/download/"]')]
+    text = _html_text(str(body))
+    result = {"title": _strip_tags(str(title)) if title else "法律草案預告", "full_text": text,
+              "source_url": url, "attachments": attachments}
+    pdf = next((a["url"] for a in attachments if a["url"].lower().endswith(".pdf") and
+                any(word in a["title"] for word in ("草案", "對照表"))), "")
+    if pdf:
+        body_text, too_big = await _pdf_text(http, pdf)
+        result.update(pdf_url=pdf, full_text=text + ("\n\n【草案附件】\n" + body_text if body_text else ""))
+        result["note"] = ("草案附件超過 60 MB，請開 PDF" if too_big else
+                          "草案附件無可擷取文字，請開 PDF" if not body_text else "對照表的欄位擷取後可能交錯，請對照 PDF")
+    return result
+
+
 class LegislativeRecordsClient:
     def __init__(self, cache: CacheDB):
         self.cache = cache
@@ -262,6 +320,8 @@ class LegislativeRecordsClient:
         try:
             if kind == "bills":
                 group = await search_bills(self.http, keyword, status, term, page)
+            elif kind == "join":
+                group = await search_join(keyword, status, page)
             elif kind == "gazette":
                 group = await search_gazette(self.http, keyword, term, page)
             else:
@@ -276,13 +336,15 @@ class LegislativeRecordsClient:
         kind, _, native = record_id.partition(":")
         cache_key = f"legrec:{record_id}"
         cached = await self.cache.get_judgment(cache_key)
-        if cached:
+        if cached and not cached.get("full_text_truncated"):
             return {"success": True, "cached": True, **cached}
         try:
             if kind == "bill":
                 data = await get_bill(self.http, native)
             elif kind == "gazette":
                 data = await get_gazette(self.http, native)
+            elif kind == "join":
+                data = await get_join(self.http, native)
             elif kind == "draft":
                 data = await get_draft(self.http, native)
             elif kind == "lispdf":
@@ -294,7 +356,7 @@ class LegislativeRecordsClient:
         except (httpx.HTTPError, ValueError) as e:
             return error_response(f"立法資料來源連線失敗：{type(e).__name__}: {e}")
         full = data.get("full_text", "")
-        data = {"id": record_id, **data, "full_text": full[:MAX_TEXT], "full_text_truncated": len(full) > MAX_TEXT}
+        data = {"id": record_id, **data, "full_text": full, "full_text_truncated": False}
         if full and kind != "bill":  # 議案的審議進度會變，不長期快取
             await self.cache.set_judgment(cache_key, data, source="legislative_records")
         return {"success": True, "cached": False, **data}

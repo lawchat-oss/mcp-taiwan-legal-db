@@ -7,7 +7,7 @@ A Model Context Protocol (MCP) server that gives any MCP-compatible AI assistant
 - **Judicial Yuan judgments** — judgment.judicial.gov.tw (full-text search + get, with the appeal history of each case)
 - **National regulation database** — law.moj.gov.tw (11,700+ laws and ordinances, with official English translations, latest promulgation dates and effective-date notes)
 - **Constitutional Court** — 871 Grand Justices interpretations (釋字) and Constitutional Court judgments (憲判字), with full reasoning text, served offline from a bundled cache; pending cases, oral hearings, amicus calls and case-file documents queried live
-- **Administrative interpretations (行政函釋)** — 45 official sources: Ministry of Justice, Labor, Health and Welfare, Finance, Economic Affairs, Interior, Transportation, the Central Bank, the Financial Supervisory Commission, the Directorate-General of Personnel Administration, the Consumer Protection Committee, the Examination Yuan system, Taipei and New Taipei City and more, plus the IPO's patent and trademark examination guidelines; each result carries the official "discontinued" / "in force" marking where the site provides one (live)
+- **Administrative interpretations (行政函釋)** — 51 official sources: Ministry of Justice, Labor, Health and Welfare, Finance, Economic Affairs, Interior, Transportation, the Central Bank, the Financial Supervisory Commission, the Directorate-General of Personnel Administration, the Consumer Protection Committee, the Examination Yuan system, Taipei and New Taipei City and more, plus the IPO's patent and trademark examination guidelines; each result carries the official "discontinued" / "in force" marking where the site provides one (live)
 - **Court resolutions and precedents** — Judicial Yuan law database: Supreme Court resolutions, legal Q&A conferences, discontinued precedents, 院字 / 院解字, Grand Chamber rulings, selected judgments (精選裁判)
 - **Administrative appeals and quasi-judicial decisions** — appeal decisions of the Executive Yuan, ministries and local governments; Fair Trade Commission decisions, Ministry of Labor unfair-labor-practice rulings, civil-service protection decisions, FSC sanctions, procurement complaint reviews, Control Yuan cases, lawyer disciplinary decisions
 - **Legislative materials** — each article's text and legislative reasons (立法理由) at every amendment, the legislative process, Legislative Yuan bills (including pending drafts) and gazette records, pre-announced draft regulations
@@ -62,13 +62,15 @@ claude mcp add taiwan-legal-db mcp-taiwan-legal-db --scope user
 
 Then `/mcp` to reload, and Claude will pick up the 26 MCP tools on natural-language queries.
 
-**Chromium (Judicial Yuan WAF fallback)**: since v1.1.0 it is downloaded automatically the first time it is needed. On machines that cannot download at runtime, pre-install it:
+**Chromium**: required for Ministry of Culture appeals and for challenge fallbacks on Sports, Yunlin and MAC pages. Install it in advance. The existing Judicial Yuan WAF fallback still supports automatic installation on first use:
 
 ```bash
 uvx --from mcp-taiwan-legal-db playwright install chromium    # only used when the Judicial Yuan WAF triggers; idle otherwise
 ```
 
 ---
+
+Interior and Health and Welfare appeals also require local OCR: run `uvx --from "mcp-taiwan-legal-db[captcha]" mcp-taiwan-legal-db`, or install `.venv/bin/pip install -e ".[captcha]"` for development. Missing OCR dependencies produce an explicit error; recognition is limited to two attempts in fresh public sessions.
 
 ## Development setup
 
@@ -84,7 +86,7 @@ python3 -m venv .venv
 .venv/bin/pip install --upgrade pip
 .venv/bin/pip install -e .
 
-# 3. Install Playwright Chromium (only invoked when the Judicial Yuan WAF triggers; idle otherwise)
+# 3. Install Playwright Chromium for official sources that require a browser
 .venv/bin/playwright install chromium
 
 # 4. Verify the server starts and registers all 26 tools
@@ -138,7 +140,7 @@ If that prints without errors, you're done. The repo ships a `.mcp.json` at the 
 
 | Tool | Purpose | Typical call |
 |---|---|---|
-| `search_agency_interpretations` | Search interpretive letters and rulings (行政函釋) and the IPO's examination guidelines across 45 official sources, live, flagging discontinued ones | `search_agency_interpretations(keyword="加班費", agency="勞動部")` |
+| `search_agency_interpretations` | Search interpretive letters and rulings (行政函釋) and the IPO's examination guidelines across 51 official sources, live, flagging discontinued ones | `search_agency_interpretations(keyword="加班費", agency="勞動部")` |
 | `get_agency_interpretation` | Full text of one interpretation (subject, explanation, related articles, editor's notes, validity marking) | `get_agency_interpretation("moj:FE393340")` |
 | `search_precedents` | Search Supreme Court resolutions (決議), legal Q&A conferences (法律問題座談), discontinued precedents (停止適用判例), Judicial Yuan interpretations (院字/院解字), Grand Chamber rulings (大法庭) and selected judgments (精選裁判) | `search_precedents(keyword="借名登記", category="決議")` |
 | `get_precedent` | Full text of one of those, including editor's notes such as 不再援用 (no longer followed) | `get_precedent("D:A,20170214,001")` |
@@ -299,11 +301,11 @@ Retrieves the full text of a Grand Justices interpretation (釋字 No. 1–813) 
 |------|---------|----------|
 | Default (case ID / date / issue / interpretation text) | always returned | ✓ |
 | Reasoning excerpt by keyword | `reasoning_keyword="..."` | ✓ |
-| Full reasoning (up to 15,000 chars) | `include_reasoning=True` | ✓ |
+| Full reasoning (no character limit) | `include_reasoning=True` | ✓ |
 | Opinion excerpt by keyword | `opinions_keyword="..."` | ✓ |
 | Full opinions | `include_opinions=True` | ✓ |
 | One opinion in full | `opinion_document="許宗力"` | ✓ |
-| Rest of an opinion longer than 15,000 chars | `opinions_offset=15000` (from the returned `opinions_next_offset`) | ✓ |
+| Read from a chosen offset to the end (legacy parameter) | `opinions_offset=15000` | ✓ |
 
 ```python
 # Default tier (offline, ~0ms)
@@ -315,10 +317,10 @@ get_interpretation("釋字748", reasoning_keyword="婚姻自由")
 # Locate a particular Justice in the opinions
 get_interpretation("釋字758", opinions_keyword="湯德宗")
 
-# Read one Justice's opinion in full (when all opinions together exceed the size cap)
+# Read one Justice's opinion in full
 get_interpretation("釋字758", opinion_document="許宗力")
 
-# An opinion over 15,000 chars is truncated; continue from the returned opinions_next_offset
+# Optionally read all remaining text from a chosen character offset
 get_interpretation("釋字777", opinion_document="吳陳鐶", opinions_offset=15000)
 
 # Constitutional Court judgment under the new regime
@@ -391,7 +393,7 @@ get_constitutional_case_file(document_id="492306")               # full text of 
 <details>
 <summary><b><code>search_agency_interpretations</code> / <code>get_agency_interpretation</code></b></summary>
 
-Each agency publishes its interpretations in its own system; there is no shared API. This tool queries the following official systems at request time (45 sources in all; the administrative rules of Foreign Affairs, Veterans Affairs, the Nuclear Safety Commission and the National Development Council are mostly internal procedures and are queried only when `agency` names them), merges the hits newest-first, and keeps one copy of a letter that appears in several sources (the issuing agency's own system wins):
+Each agency publishes its interpretations in its own system; there is no shared API. This tool queries the following official systems at request time (51 sources in all; Foreign Affairs, Veterans Affairs, the Nuclear Safety Commission, the National Development Council, NCC, Hakka Affairs, Overseas Community Affairs, Sports, Customs new letters and MAC advertising letters are queried only when explicitly named in `agency`), merges the hits newest-first, and keeps one copy of a letter that appears in several sources (the issuing agency's own system wins):
 
 | Source | Content |
 |---|---|
@@ -417,7 +419,11 @@ Each agency publishes its interpretations in its own system; there is no shared 
 | Taipei City regulation system | Taipei City Government interpretations, plus central-agency interpretations it carries |
 | New Taipei City regulation system | New Taipei City Government and central-agency interpretations (the 5 categories with the most hits are listed; the rest are counted) |
 | Judicial Yuan law database (FINT) | Cross-agency interpretations (Judicial Yuan, Ministry of Justice and others) |
-| Executive Yuan Gazette | Interpretive rules issued under Administrative Procedure Act Art. 159(2)(ii) — the route for agencies without their own system, e.g. the National Development Council or the NCC |
+| NCC | Administrative interpretations, including individual letters, from its regulation system; specify `agency="NCC"` |
+| Hakka Affairs, Overseas Community Affairs, Sports | Administrative rules; explicit source selection; no inferred in-force status |
+| Customs new letters | Public CSRF form; title search only, date filters not applied |
+| MAC main-site advertising letters | Only letters and guidance in the advertising category; title matching, not all MAC correspondence |
+| Executive Yuan Gazette | Interpretive rules officially published under Administrative Procedure Act Art. 159(2)(ii); partial fallback for Digital Affairs, whose regulation-system verification still cannot be completed automatically |
 
 ```python
 # All sources
@@ -498,7 +504,7 @@ These are searched only when named in `source`:
 | 工程會 / 採購申訴 | Procurement complaint review decisions (no keyword search on the official site — look up by case number such as 訴1130123 or by year; only the reasoning is published) |
 | 監察院 (or 調查報告 / 糾正 / 彈劾 / 糾舉) | Control Yuan investigation reports, corrective measures, impeachments and censures (the site is slow; a query can take tens of seconds) |
 | 律師懲戒 | Lawyer disciplinary and disciplinary-review decisions (needs a precise keyword such as a name or case number) |
-| An agency or local government, e.g. 臺北市, 新北市, 國防部, 交通部, 法務部, 金管會, 退輔會; 訴願 = every appeal source | Appeal decisions of ministries (Justice, Foreign Affairs, National Defense, Transportation, FSC, Central Bank, Veterans Affairs, NSTC, Digital Affairs, Public Construction Commission, Indigenous Peoples) and local governments (Taipei, New Taipei, Taichung, Kaohsiung, Changhua, Hualien, Kinmen, Miaoli, Taitung, Chiayi City, Chiayi County, Yilan, Hsinchu County). Some sites only match titles or only report page counts; see each source's `note` |
+| An agency or local government, e.g. 臺北市, 新北市, 國防部, 交通部, 法務部, 金管會, 退輔會; 訴願 = every appeal source | Appeal decisions of ministries (Justice, Foreign Affairs, National Defense, Transportation, FSC, Central Bank, Veterans Affairs, NSTC, Digital Affairs, Public Construction Commission, Indigenous Peoples, Economic Affairs, Agriculture, Education, Culture, Environment, Labor, Interior, Health and Welfare, the Central Election Commission and Personnel Administration) and local governments (Taipei, New Taipei, Taichung, Kaohsiung, Changhua, Hualien, Kinmen, Miaoli, Taitung, Chiayi City, Chiayi County, Yilan, Hsinchu County, Keelung). Some sites only match titles or only report page counts; see each source's `note` |
 
 ```python
 search_administrative_decisions(keyword="個人資料", source="行政院")
@@ -510,7 +516,7 @@ search_administrative_decisions(keyword="違規停車", source="臺北市,新北
 get_administrative_decision("ey:A-115-000633")                             # text extracted from the PDF
 ```
 
-Decisions are returned as the official sites publish them: most agencies mask the parties' names (○○), while some older cases (Executive Yuan cases filed up to ROC 108, Ministry of Justice decisions from before about ROC 112) and the Council of Indigenous Peoples' decisions are published unmasked; this server does not mask them further. The appeal searches of the Ministries of Labor, Finance, Interior and Health and Welfare and Tainan City need a captcha and are not included; the appeal sites of the Ministries of Economic Affairs, Agriculture and Education are not yet included. Names of disciplined lawyers in lawyer disciplinary decisions are officially public. When a PDF has no extractable text (mostly FTC files before 2008 or scans), `pdf_url` is returned for the user to open.
+Decisions are returned as the official sites publish them: most agencies mask the parties' names (○○), while some older cases (Executive Yuan cases filed up to ROC 108, Ministry of Justice decisions from before about ROC 112) and the Council of Indigenous Peoples' decisions are published unmasked; this server does not mask them further. Labor uses its public voice-verification endpoint; Interior and Health and Welfare use local image OCR (`[captcha]`); Culture uses Playwright. Interior, Environment and Health and Welfare default to the current year. Education and Agriculture are limited to five pages. Keelung and CEC search titles; Personnel Administration filters only the requested page. Finance and Taoyuan remain unreachable from the test environment; Tainan verification is still unreliable and was not added. Names of disciplined lawyers are officially public. `source="醫事懲戒"` queries currently posted medical disciplinary notices (default: physicians; a profession prefix changes the category), matching names, locations and certificate numbers. Scanned decisions are supplied as PDF links. When a PDF has no extractable text (mostly FTC files before 2008 or scans), `pdf_url` is returned for the user to open.
 </details>
 
 <details>
@@ -541,9 +547,11 @@ search_legislative_records("勞動基準法", kind="bills")                 # pe
 search_legislative_records("勞動基準法第五十五條", kind="gazette")     # legislative intent: law name + article
 search_legislative_records("個人資料", kind="drafts")                  # ministries' draft regulations
 get_legislative_record("bill:202110226160000")                         # bill text and review progress
+search_legislative_records("條例", kind="join", status="pending")     # JOIN draft laws; closed = ended consultations
+# Consultation state is not legal validity. Returns notice text, one selected draft/comparison PDF, and attachment links.
 ```
 
-20 results per page (10 for `drafts`); full texts over 60,000 characters are truncated. A bill's progress changes, so bill texts are not cached long-term.
+20 results per page (10 for `drafts`); full text is returned without character truncation. A bill's progress changes, so bill texts are not cached long-term.
 </details>
 
 <details>
@@ -589,7 +597,7 @@ Official and open-access sources only — no subscription databases:
 | 司法研究年報 | Judicial Yuan research reports (incl. 司法研究年報), full text split by chapter |
 | 期刊 | National Central Library Taiwan periodical index: bibliographic records and abstracts of law journal articles; full text where the author has licensed it |
 | GRB | Government Research Bulletin: abstracts of NSTC- and ministry-funded research projects (reports must be downloaded on the GRB site) |
-| 開放期刊 | Academia Sinica Law Journal and NCCU Law Review (full text from the journals' sites) |
+| 開放期刊 | Academia Sinica Law Journal, NCCU Law Review and NTU Law Journal (official-site full text; NTU only resolves identifiable issues and PDFs explicitly marked full text/final manuscript, never abstracts) |
 
 ```python
 search_legal_literature("量刑", source="司法研究年報")
@@ -597,7 +605,7 @@ search_legal_literature("勞動派遣", source="期刊", year_from=105)
 get_legal_literature("ncl:A15001353")           # record and abstract; full text when licensed
 ```
 
-Cite author, title, journal, volume and year. Full texts licensed through the NCL are for personal reading only: the server never caches them; do not store or redistribute them. Full texts over 60,000 characters are truncated.
+Cite author, title, journal, volume and year. Full texts licensed through the NCL are for personal reading only: the server never caches them; do not store or redistribute them. Full text is returned without character truncation.
 </details>
 
 <details>
@@ -607,7 +615,7 @@ Legal texts outside the national regulation database's list of laws and ordinanc
 
 | Category | Sources |
 |---|---|
-| Local government regulations | Taipei, New Taipei, Taoyuan, Taichung, Tainan, Kaohsiung, Keelung, Hsinchu County and City, Miaoli, Changhua, Nantou, Chiayi County and City, Pingtung, Yilan, Hualien, Taitung, Penghu, Kinmen, Lienchiang (current regulations only; Yunlin's site sits behind a Cloudflare challenge and is not included) |
+| Local government regulations | Taipei, New Taipei, Taoyuan, Taichung, Tainan, Kaohsiung, Keelung, Hsinchu County and City, Miaoli, Changhua, Nantou, Chiayi County and City, Pingtung, Yilan, Hualien, Taitung, Penghu, Kinmen, Lienchiang and Yunlin (current regulations only; Yunlin uses a browser when challenged) |
 | Treaties and agreements | Treaties in the national regulation database (title match only), the MOFA treaty database (some older treaties are scans with only a PDF link), MOF income tax agreements |
 | Exchange rules | TWSE, TPEx and TAIFEX (TPEx and TAIFEX rules come from the SFI regulation system — for reference only, no republishing) |
 
@@ -618,7 +626,7 @@ search_other_regulations("營業細則", source="證交所")
 get_other_regulation("taichung:GL001385", article_no="3")   # Taichung City Funeral Management Autonomy Ordinance, art. 3
 ```
 
-Without `source` all 21 sources are queried, so name one. Most sources treat the keyword as a single term; give one term at a time. Article-structured texts return `articles`; unstructured ones (guidelines, treaties) return `full_text`.
+Without `source` all 28 sources are queried, so name one. Most sources treat the keyword as a single term; give one term at a time. Article-structured texts return `articles`; unstructured ones (guidelines, treaties) return `full_text`.
 </details>
 
 ---
@@ -842,9 +850,11 @@ Every live query goes to a **public** database run by a Taiwan government agency
 | TWSE regulation knowledge base | twse-regulation.twse.com.tw | TWSE rules |
 | Securities and futures regulation system (SFI) | www.selaw.com.tw | TPEx and TAIFEX rules |
 
+Endpoints, coverage limits and itemized verification are in [SOURCES.md](SOURCES.md) and the [source audit](docs/source-audit-2026-10-03.json).
+
 `get_judgment` accepts a user-supplied URL, and `mcp_server/config.py:ALLOWED_DOMAINS` restricts that to the judgment and regulation domains; every other tool only calls the fixed endpoints above and never takes an arbitrary URL. The following sites disallow crawlers in robots.txt (or exclude specific paths); for those the server only performs single, user-triggered lookups and never bulk-fetches: the Judicial Yuan law database (legal.judicial.gov.tw), the Ministry of Health and Welfare system (mohwlaw.mohw.gov.tw), the Executive Yuan appeals site (appeal.ey.gov.tw), the Legislative Yuan parliamentary site (ppg.ly.gov.tw), the MOI Department of Land Administration (www.land.moi.gov.tw), the appeal full-text path of the Taipei City regulation system (laws.gov.taipei), the treaty search of the national regulation database (law.moj.gov.tw) and the Ministry of Finance `/download/` files (www.mof.gov.tw). The securities and futures regulation system (www.selaw.com.tw) forbids republishing without written permission, so TPEx and TAIFEX rules are for reference only and results carry a notice. Interpretations, resolutions, appeal and FTC decisions and similar documents are official documents, which Taiwan's Copyright Act Art. 9 excludes from copyright; journal articles, research reports and exchange rules are not, so follow each source's terms when quoting them. Full texts licensed through the National Central Library are for personal reading only and are never written to the cache.
 
-**Privacy and access limits**: the server only relays what the official sites publish, at the moment a user asks; it adds no masking of its own and keeps no database. Some appeal decisions (Executive Yuan cases filed up to ROC 108, Ministry of Justice decisions from before about ROC 112, the Council of Indigenous Peoples) are published with the parties' names unmasked and are returned as published. Sites gated by a captcha or a Cloudflare challenge (the appeal searches of the Ministries of Labor, Finance, Interior and Health and Welfare and Tainan City, medical disciplinary decisions, the NCC, the Ministry of Digital Affairs regulation system) are not included, and no attempt is made to get past them. The Judicial Yuan sentencing system is used only for its public aggregate statistics; the per-judgment list that the site reserves for court staff is never called.
+**Privacy and access limits**: the server only relays what the official sites publish, at the moment a user asks; it adds no masking of its own and keeps no database. Some appeal decisions (Executive Yuan cases filed up to ROC 108, Ministry of Justice decisions from before about ROC 112, the Council of Indigenous Peoples) are published with the parties' names unmasked and are returned as published. Only public, unauthenticated data is queried. Fresh browser sessions can complete JavaScript/Cloudflare checks and public-query captchas. Each request stays within the user’s query and selected full text; failed verification is reported as an error, never as zero results. No login, staff-only access or bulk collection is used. The Judicial Yuan sentencing system is used only for its public aggregate statistics; the per-judgment list that the site reserves for court staff is never called.
 
 **Judgment year coverage**: this server proxies the Judicial Yuan system live and has no database of its own, so effective coverage = whatever the Judicial Yuan holds. Measured (counting hits for keyword 「竊盜」): tens of thousands per year from ROC 89 (2000) onward, ~2,000 total for 81–88 (1992–1999), zero before 80 (1991). The Judicial Yuan states its open-data dump has "the same scope as the judgment search system", so no earlier public source exists. Expect empty or sparse results for pre-2000 queries.
 
@@ -859,6 +869,8 @@ The Constitutional Court corpus (釋字 / 憲判字) is **not** fetched at query
 | Justices' opinions, full text (`opinions.zip`) | 1,541 documents | — | 1,541 with full text | 10.8 MB |
 
 From 釋字 No. 401 onward, and for all 憲判字, the official site publishes Justices' opinions only as PDF attachments. Their text is extracted and bundled in `opinions.zip`; responses include `opinion_documents` with each opinion's title, official PDF link and character count. 22 PDFs use fonts that cannot be decoded or contain page images (mostly some opinions in 釋字 Nos. 735–753); they were transcribed verbatim from the page images (flagged `transcribed`; check the official PDF before quoting). The Constitutional Court's published PDFs are treated as authoritative; the National Regulations Database carries later-edited versions of earlier opinions (normalized wording, corrected typos, party names redacted), so wording may differ slightly. Rebuild with `scripts/build_opinions.py`; when the court publishes new 憲判字, `scripts/build_new_cases.py` adds just the new cases (with their opinions).
+
+Full-text tools no longer truncate at 15,000/20,000/30,000/60,000 characters; previously truncated cache entries are refreshed. Source pagination, keyword-snippet mode, attachment-count and download-size limits still apply. Scanned documents without a text layer retain their original links.
 
 ## Caching
 
