@@ -37,7 +37,9 @@ def test_date_normalizes_roc_and_gregorian(raw, iso):
 
 
 def test_resolve_sources_maps_names_and_falls_back_to_gazette():
-    assert ai.resolve_sources("") == (list(ai.SOURCES), [])
+    keys, _ = ai.resolve_sources("")
+    assert "mofa" not in keys and len(keys) == len(ai.SOURCES) - len(ai._NAMED_ONLY)  # 內部作業要點類只在指名時查
+    assert ai.resolve_sources("退輔會") == (["vac"], [])
     assert ai.resolve_sources("勞委會") == (["mol"], [])
     assert ai.resolve_sources("金管會") == (["fsc"], [])
     keys, others = ai.resolve_sources("內政部,客委會")
@@ -49,6 +51,7 @@ def test_resolve_sources_maps_names_and_falls_back_to_gazette():
     ("考試院", ["mocs", "csptc", "moex", "exam"]), ("地政司", ["land"]), ("內政部地政司", ["land"]),
     ("交通部", ["motc"]), ("央行", ["cbc"]), ("教育部", ["moe"]), ("國科會", ["nstc"]), ("公平會", ["ftc"]),
     ("台北市", ["taipei"]), ("北市", ["taipei"]), ("消防署", ["nfa"]),
+    ("關務署", ["mof_rules"]), ("人事總處", ["dgpa"]), ("中選會", ["cec"]), ("陸委會", ["mac"]),
 ])
 def test_resolve_sources_routes_agencies_to_their_own_systems(agency, keys):
     assert ai.resolve_sources(agency) == (keys, [])
@@ -322,7 +325,8 @@ async def test_exec_family_reads_exam_and_moenv_rows():
         (g2,) = await ai.SOURCES["moenv"][2](http, ai.Query(keyword="廢棄物"))
     assert seen[0].params["Ncid"] == "04" and seen[0].params["StartDate"] == "20250101"  # 網址參數用西元
     assert g1["items"] == [{"id": "csptc:15292", "agency": "公務人員保障暨培訓委員會", "category": "行政函釋",
-                            "doc_number": "公評字第11422602041號函", "date": "2025-08-21", "summary": "有關考績委員會"}]
+                            "doc_number": "公評字第11422602041號函", "date": "2025-08-21", "summary": "有關考績委員會",
+                            "status": "適用中"}]
     assert g1["total"] == 1 and g2["total"] == 1426 and g2["items"][0]["summary"] == "關於廢棄物清理法"
 
 
@@ -342,7 +346,8 @@ async def test_lawsys_family_is_config_per_site():
             await ai.SOURCES["moe"][3](http, "GL1&x=1")
     assert len(seen) == 1 and seen[0].host == "edu.law.moe.gov.tw" and seen[0].params["LNumber"] == "1155402068"
     assert group["items"][0] == {"id": "moe:GL002412", "agency": "教育部", "category": "行政規則（含解釋令、函）",
-                                 "doc_number": "", "date": "2026-07-27", "summary": "各級學校教師解釋令"}
+                                 "doc_number": "", "date": "2026-07-27", "summary": "各級學校教師解釋令",
+                                 "status": "適用中"}
     assert group["total"] == 121 and group["has_more"] is True
 
 
@@ -375,9 +380,10 @@ async def test_land_merges_letter_listed_under_several_articles():
     first, old = group["items"]
     assert first == {"id": "land:8918054:2001-01-16", "agency": "內政部", "date": "2001-01-16",
                      "doc_number": "台內地字第8918054號函", "category": "地政法令解釋函", "summary": "占有人主張時效取得所有權",
-                     "related_laws": ["土地法 《第54條》", "民法 《第769條》"], "notes": ""}
+                     "related_laws": ["土地法 《第54條》", "民法 《第769條》"], "notes": "", "status": "適用中"}
     assert old["id"] == "land:8806998:1999-06-07" and old["doc_number"] == "台（八八）內地字第8806998號函"
-    assert old["notes"] == "已停止適用/廢止；停止適用：內政部92年4月29日台內地字第0920069937號函"
+    assert old["notes"] == "" and old["status"] == "停止適用"
+    assert old["status_note"] == "內政部92年4月29日台內地字第0920069937號函"
     assert group["total"] == 3 and "日期篩選未套用" in group["note"]
     assert doc["full_text"] == "一、按土地法。\n二、應予受理。" and "Etext=8918054" in doc["source_url"]
 
@@ -432,10 +438,11 @@ async def test_cbc_needs_category_boxes_and_drops_recipients():
     assert seen[0].params.get_list("criteria.lawCheckBoxs") == list(ai._CBC_TYPES)
     assert group["items"] == [{"id": "cbc:6", "agency": "中央銀行", "date": "1979-03-26",
                                "doc_number": "金融業務檢查處臺央檢字第419號函", "category": "行政令函",
-                               "summary": "(停)【合理經營業務】建立進出口押匯分戶卡"}]
+                               "summary": "【合理經營業務】建立進出口押匯分戶卡", "status": "停止適用"}]
     assert group["total"] == 160 and group["has_more"] is True
     assert doc["agency"] == "中央銀行業務局" and doc["date"] == "2022-12-22" and doc["summary"] == "調整準備金利率"
     assert doc["full_text"] == "主旨：利率調整如說明。\n說明：一、活期 0.396%。\n二、不給付利息。"
+    assert "status" not in doc  # 央行不標「適用中」
 
 
 async def test_taipei_queries_city_and_central_categories():

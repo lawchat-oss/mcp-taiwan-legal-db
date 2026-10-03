@@ -994,8 +994,8 @@ async def _r5_get(cfg: _Rhythm, http, sn: str) -> dict:
                 mine = re.search(rf"/relfile/\d+/{sn}/", path, re.I)
                 (own if mine else other).setdefault(a["href"], _b64(q.get("n", [""])[0]) or path.rsplit("/", 1)[-1])
         files = own or other
-        if not files:
-            raise LookupError(sn)
+        if not files:  # 例如宜蘭 105 年的彙整項目：頁面在，官網沒放檔案
+            raise ValueError(f"官網這筆沒有附件 PDF，請開 {url}")
         texts = []
         for href, name in list(files.items())[:MAX_FILES]:
             if sum(map(len, texts)) >= MAX_TEXT:

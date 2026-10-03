@@ -7,7 +7,7 @@ A Model Context Protocol (MCP) server that gives any MCP-compatible AI assistant
 - **Judicial Yuan judgments** — judgment.judicial.gov.tw (full-text search + get, with the appeal history of each case)
 - **National regulation database** — law.moj.gov.tw (11,700+ laws and ordinances, with official English translations, latest promulgation dates and effective-date notes)
 - **Constitutional Court** — 871 Grand Justices interpretations (釋字) and Constitutional Court judgments (憲判字), with full reasoning text, served offline from a bundled cache; pending cases, oral hearings, amicus calls and case-file documents queried live
-- **Administrative interpretations (行政函釋)** — about 30 official sources: Ministry of Justice, Labor, Health and Welfare, Finance, Economic Affairs, Interior, Transportation, the Central Bank, the Financial Supervisory Commission, the Examination Yuan system, Taipei City and more, plus the IPO's patent and trademark examination guidelines (live)
+- **Administrative interpretations (行政函釋)** — 45 official sources: Ministry of Justice, Labor, Health and Welfare, Finance, Economic Affairs, Interior, Transportation, the Central Bank, the Financial Supervisory Commission, the Directorate-General of Personnel Administration, the Consumer Protection Committee, the Examination Yuan system, Taipei and New Taipei City and more, plus the IPO's patent and trademark examination guidelines; each result carries the official "discontinued" / "in force" marking where the site provides one (live)
 - **Court resolutions and precedents** — Judicial Yuan law database: Supreme Court resolutions, legal Q&A conferences, discontinued precedents, 院字 / 院解字, Grand Chamber rulings, selected judgments (精選裁判)
 - **Administrative appeals and quasi-judicial decisions** — appeal decisions of the Executive Yuan, ministries and local governments; Fair Trade Commission decisions, Ministry of Labor unfair-labor-practice rulings, civil-service protection decisions, FSC sanctions, procurement complaint reviews, Control Yuan cases, lawyer disciplinary decisions
 - **Legislative materials** — each article's text and legislative reasons (立法理由) at every amendment, the legislative process, Legislative Yuan bills (including pending drafts) and gazette records, pre-announced draft regulations
@@ -138,8 +138,8 @@ If that prints without errors, you're done. The repo ships a `.mcp.json` at the 
 
 | Tool | Purpose | Typical call |
 |---|---|---|
-| `search_agency_interpretations` | Search interpretive letters and rulings (行政函釋) and the IPO's examination guidelines across about 30 official sources, live | `search_agency_interpretations(keyword="加班費", agency="勞動部")` |
-| `get_agency_interpretation` | Full text of one interpretation (subject, explanation, related articles, editor's notes) | `get_agency_interpretation("moj:FE393340")` |
+| `search_agency_interpretations` | Search interpretive letters and rulings (行政函釋) and the IPO's examination guidelines across 45 official sources, live, flagging discontinued ones | `search_agency_interpretations(keyword="加班費", agency="勞動部")` |
+| `get_agency_interpretation` | Full text of one interpretation (subject, explanation, related articles, editor's notes, validity marking) | `get_agency_interpretation("moj:FE393340")` |
 | `search_precedents` | Search Supreme Court resolutions (決議), legal Q&A conferences (法律問題座談), discontinued precedents (停止適用判例), Judicial Yuan interpretations (院字/院解字), Grand Chamber rulings (大法庭) and selected judgments (精選裁判) | `search_precedents(keyword="借名登記", category="決議")` |
 | `get_precedent` | Full text of one of those, including editor's notes such as 不再援用 (no longer followed) | `get_precedent("D:A,20170214,001")` |
 
@@ -391,7 +391,7 @@ get_constitutional_case_file(document_id="492306")               # full text of 
 <details>
 <summary><b><code>search_agency_interpretations</code> / <code>get_agency_interpretation</code></b></summary>
 
-Each agency publishes its interpretations in its own system; there is no shared API. This tool queries the following official systems at request time (31 sources in all), merges the hits newest-first, and keeps one copy of a letter that appears in several sources (the issuing agency's own system wins):
+Each agency publishes its interpretations in its own system; there is no shared API. This tool queries the following official systems at request time (45 sources in all; the administrative rules of Foreign Affairs, Veterans Affairs, the Nuclear Safety Commission and the National Development Council are mostly internal procedures and are queried only when `agency` names them), merges the hits newest-first, and keeps one copy of a letter that appears in several sources (the issuing agency's own system wins):
 
 | Source | Content |
 |---|---|
@@ -401,14 +401,21 @@ Each agency publishes its interpretations in its own system; there is no shared 
 | Ministry of Environment regulation system | 行政函釋 |
 | Public Construction Commission | Government Procurement Act interpretations |
 | Ministry of Finance tax ruling system | Tax ruling compilation (法令彙編), newly issued rulings (新頒令釋) |
+| Ministry of Finance regulation system | Interpretive orders and administrative rules of the Ministry, Customs Administration, National Property Administration and National Treasury Administration |
+| Ministry of Economic Affairs regulation system | Interpretive orders and administrative rules of the Ministry and its agencies (Water Resources, Standards, Trade, etc.) |
 | MOEA Administration of Commerce | Company Act, Business Registration Act, etc. |
 | Intellectual Property Office | Copyright interpretations; patent examination guidelines (web full text) and trademark examination guidelines (PDF) |
+| Bureau of Standards, Metrology and Inspection | Interpretive letters (commodity inspection, metrology) |
+| Directorate-General of Personnel Administration | Civil service personnel interpretations (appointment, pay, leave) |
+| Executive Yuan Consumer Protection Committee | Consumer Protection Act interpretations (titles and abstracts matched) |
+| Control Yuan sunshine-law site | Competent authorities' interpretations of the Political Donations Act, the Conflict of Interest Act and the asset disclosure law (titles matched) |
 | MOI Department of Household Registration, National Land Management Agency, Department of Land Administration, National Fire Agency | Household registration and nationality; building administration and urban planning; land administration (incl. discontinued letters); fire safety |
 | Ministry of Transportation regulation system | Administrative interpretations (orders, letters, notices) |
 | Central Bank regulation system | Administrative orders and letters |
 | Examination Yuan shared regulation system | Ministry of Civil Service, Civil Service Protection and Training Commission, Ministry of Examination and Examination Yuan interpretations |
-| Ministries' shared regulation systems | Administrative rules (where interpretive orders and letters are filed; results also include ordinary administrative rules) of the FSC, Education, Agriculture, Interior, Culture, NSTC, Indigenous Peoples, Ocean Affairs and Fair Trade Commission |
+| Ministries' shared regulation systems | Administrative rules (where interpretive orders and letters are filed; results also include ordinary administrative rules) of the FSC, Education, Agriculture, Interior, Culture, NSTC, Indigenous Peoples, Ocean Affairs, Fair Trade Commission, Mainland Affairs Council, Central Election Commission (incl. its interpretations) and DGBAS; Foreign Affairs, Veterans Affairs, Nuclear Safety and NDC only when named |
 | Taipei City regulation system | Taipei City Government interpretations, plus central-agency interpretations it carries |
+| New Taipei City regulation system | New Taipei City Government and central-agency interpretations (the 5 categories with the most hits are listed; the rest are counted) |
 | Judicial Yuan law database (FINT) | Cross-agency interpretations (Judicial Yuan, Ministry of Justice and others) |
 | Executive Yuan Gazette | Interpretive rules issued under Administrative Procedure Act Art. 159(2)(ii) — the route for agencies without their own system, e.g. the National Development Council or the NCC |
 
@@ -422,6 +429,8 @@ search_agency_interpretations(keyword="私募", agency="金管會")
 search_agency_interpretations(keyword="時效取得", agency="地政司")
 search_agency_interpretations(keyword="考績", agency="銓敘部")
 search_agency_interpretations(keyword="專利要件", agency="專利")   # IPO guidelines match chapter titles only
+search_agency_interpretations(keyword="加班費", agency="人事總處")
+search_agency_interpretations(keyword="關係人", agency="陽光法令")
 
 # By document number
 search_agency_interpretations(doc_number="法律字第11403512580號")
@@ -429,6 +438,17 @@ search_agency_interpretations(doc_number="法律字第11403512580號")
 # Full text (id from the search results)
 get_agency_interpretation("moj:FE393340")
 ```
+
+**Validity marking**: `status` on results and full texts is the official site's own marking for that record. Check it before citing.
+
+| status | Meaning |
+|---|---|
+| `停止適用` | The site marks the letter as discontinued or repealed; `status_note` gives the date, the letter that discontinued it, or the site's own wording |
+| `部分停止適用` | Partly discontinued (Ministry of Transportation) |
+| `適用中` | Only from sources whose site has a two-state current / discontinued field (Labor, Health and Welfare, the Examination Yuan system, Environment, Land Administration, the ministries' shared systems' administrative rules), meaning the site lists it as current; letters in the Ministry of Finance's latest compilation are also `適用中` (re-reviewed and retained; repeals after the compilation are not marked) |
+| no `status` | The site has no marking or did not mark it — **this does not mean the letter is still in force**. Household Registration, the National Fire Agency, the IPO and the Executive Yuan Gazette have no validity field at all; Justice, the PCC, FINT, Taipei, the Central Bank and Transportation mark only discontinued letters |
+
+Official sites occasionally miss a marking or list the same letter twice (the DGPA has one letter recorded twice, one copy marked discontinued and one not), so read the full text, the `notes` (editor's notes) and later letters before citing.
 
 `categories` reports each source / category's total and whether there is another page; a source that is temporarily down carries `error` while the others still return. Recipient lists (正本 / 副本) are omitted from the full text. The National Land Management Agency and the IPO (copyright interpretations) only publish full dumps, so the first query downloads them to the user data directory (~16 MB and ~13 MB) and refreshes them weekly / daily. Each source paginates on its own (mostly 20 per page, some 10 or 25). The National Fire Agency system only exposes summaries; the letters themselves are scanned PDF attachments.
 </details>
@@ -587,7 +607,7 @@ Legal texts outside the national regulation database's list of laws and ordinanc
 
 | Category | Sources |
 |---|---|
-| Local government regulations | Taipei, New Taipei, Taichung, Kaohsiung, Tainan, Hsinchu County and City, Miaoli, Changhua, Chiayi County and City, Pingtung, Taitung, Penghu, Kinmen (current regulations only; Taoyuan, Yunlin, Keelung and Yilan cannot currently be reached automatically and are not included) |
+| Local government regulations | Taipei, New Taipei, Taoyuan, Taichung, Tainan, Kaohsiung, Keelung, Hsinchu County and City, Miaoli, Changhua, Nantou, Chiayi County and City, Pingtung, Yilan, Hualien, Taitung, Penghu, Kinmen, Lienchiang (current regulations only; Yunlin's site sits behind a Cloudflare challenge and is not included) |
 | Treaties and agreements | Treaties in the national regulation database (title match only), the MOFA treaty database (some older treaties are scans with only a PDF link), MOF income tax agreements |
 | Exchange rules | TWSE, TPEx and TAIFEX (TPEx and TAIFEX rules come from the SFI regulation system — for reference only, no republishing) |
 
@@ -613,6 +633,8 @@ Without `source` all 21 sources are queried, so name one. Most sources treat the
 "Which earlier interpretations did Interpretation No. 748 cite?"
 "Look up 111 年憲判字第 1 號"
 "What has the Ministry of Labor ruled on overtime pay?"
+"Which Ministry of Finance rulings on dividends have been discontinued?"
+"How does the DGPA treat unused-leave pay for civil servants?"
 "How does the Public Construction Commission interpret withholding bid bonds?"
 "Are there Supreme Court resolutions on nominee registration (借名登記)?"
 "Look up 院解字第 3829 號"
@@ -777,6 +799,12 @@ Every live query goes to a **public** database run by a Taiwan government agency
 | Public Construction Commission | planpe.pcc.gov.tw | Procurement interpretations |
 | Ministry of Finance tax ruling system | ttc.mof.gov.tw | Tax rulings |
 | MOEA Administration of Commerce | gcis.nat.gov.tw | Company / commercial law interpretations |
+| Ministry of Finance regulation system | law-out.mof.gov.tw | Interpretive orders and administrative rules (incl. Customs, National Property, National Treasury) |
+| Ministry of Economic Affairs regulation system | law.moea.gov.tw | Interpretive orders and administrative rules |
+| Bureau of Standards, Metrology and Inspection | www.bsmi.gov.tw | Interpretive letters |
+| Directorate-General of Personnel Administration | law.dgpa.gov.tw | Personnel interpretations |
+| Executive Yuan Consumer Protection Committee | www.ey.gov.tw | Consumer Protection Act interpretations |
+| Control Yuan sunshine-law site | sunshine.cy.gov.tw | Political donations, conflict of interest and asset disclosure interpretations |
 | Intellectual Property Office | www.tipo.gov.tw | Copyright interpretations (open data), patent and trademark examination guidelines |
 | MOI Department of Household Registration | www.ris.gov.tw | Household registration interpretations |
 | MOI National Land Management Agency | www.nlma.gov.tw | Building / planning interpretations |
@@ -784,10 +812,11 @@ Every live query goes to a **public** database run by a Taiwan government agency
 | MOI National Fire Agency | law.nfa.gov.tw | Fire safety interpretations |
 | Ministry of Environment regulation system | oaout.moenv.gov.tw | 行政函釋 |
 | Examination Yuan shared regulation system | law.exam.gov.tw | Civil service, protection and examination interpretations |
-| Ministries' shared regulation systems | law.fsc.gov.tw, edu.law.moe.gov.tw, law.moa.gov.tw, glrs.moi.gov.tw, law.moc.gov.tw, law.nstc.gov.tw, law.cip.gov.tw, law.oac.gov.tw, law.ftc.gov.tw | Administrative rules (interpretive orders, letters) of the FSC, Education, Agriculture, Interior, Culture, NSTC, Indigenous Peoples, Ocean Affairs and FTC |
+| Ministries' shared regulation systems | law.fsc.gov.tw, edu.law.moe.gov.tw, law.moa.gov.tw, glrs.moi.gov.tw, law.moc.gov.tw, law.nstc.gov.tw, law.cip.gov.tw, law.oac.gov.tw, law.ftc.gov.tw, law.mac.gov.tw, law.cec.gov.tw, law.dgbas.gov.tw, law.mofa.gov.tw, law.vac.gov.tw, erss.nusc.gov.tw, theme.ndc.gov.tw | Administrative rules (interpretive orders, letters) of the FSC, Education, Agriculture, Interior, Culture, NSTC, Indigenous Peoples, Ocean Affairs, FTC, Mainland Affairs, Central Election Commission, DGBAS, Foreign Affairs, Veterans Affairs, Nuclear Safety and NDC |
 | Ministry of Transportation regulation system | motclaw.motc.gov.tw | Administrative interpretations |
 | Central Bank regulation system | www.law.cbc.gov.tw | Orders and letters, appeal decisions |
 | Taipei City regulation system | laws.gov.taipei | Interpretations, appeal decisions, local regulations |
+| New Taipei City regulation system | web.law.ntpc.gov.tw | Interpretations, appeal decisions, local regulations |
 | Executive Yuan Gazette | gazette.nat.gov.tw | Agencies' interpretive rules, pre-announced draft regulations |
 | Executive Yuan Petitions and Appeals Committee | appeal.ey.gov.tw | Administrative appeal decisions |
 | Fair Trade Commission | www.ftc.gov.tw | Disposition decisions |
@@ -807,7 +836,7 @@ Every live query goes to a **public** database run by a Taiwan government agency
 | Government Research Bulletin (GRB) | www.grb.gov.tw, grbdef.stpi.niar.org.tw | Research project records and abstracts |
 | Academia Sinica Institutum Iurisprudentiae | www.iias.sinica.edu.tw | Academia Sinica Law Journal full text |
 | National Chengchi University College of Law | review.law.nccu.edu.tw | NCCU Law Review full text |
-| Local government regulation systems | web.law.ntpc.gov.tw, law.taichung.gov.tw, outlaw.kcg.gov.tw, law01.tainan.gov.tw, hclaw.hsinchu.gov.tw, law.hccg.gov.tw, law.miaoli.gov.tw, lawsearch.chcg.gov.tw, law.cyhg.gov.tw, law.chiayi.gov.tw, ptlaw.pthg.gov.tw, law.taitung.gov.tw, law.penghu.gov.tw, law.kinmen.gov.tw | Autonomy ordinances and regulations (Taipei above) |
+| Local government regulation systems | law.tycg.gov.tw, law.taichung.gov.tw, outlaw.kcg.gov.tw, law01.tainan.gov.tw, exlaw.klcg.gov.tw, hclaw.hsinchu.gov.tw, law.hccg.gov.tw, law.miaoli.gov.tw, lawsearch.chcg.gov.tw, glrs.nantou.gov.tw, law.cyhg.gov.tw, law.chiayi.gov.tw, ptlaw.pthg.gov.tw, glrslaw.e-land.gov.tw, glrs.hl.gov.tw, law.taitung.gov.tw, law.penghu.gov.tw, law.kinmen.gov.tw, law.matsu.gov.tw | Autonomy ordinances and regulations (Taipei and New Taipei above) |
 | MOFA treaty database | no06.mofa.gov.tw | Treaties and agreements |
 | Ministry of Finance | www.mof.gov.tw | Income tax agreements |
 | TWSE regulation knowledge base | twse-regulation.twse.com.tw | TWSE rules |
@@ -841,10 +870,12 @@ From 釋字 No. 401 onward, and for all 憲判字, the official site publishes J
 | pcode metadata | 30 days | same |
 | Appeal history (歷審) | 24 hours (separate from the full text) | same |
 | Constitutional Court case lists and case pages | 1 day | same |
-| Single documents: interpretations, precedents, decisions, legislative reasons, Constitutional Court case-file documents, gazette records and draft notices, statistical tables, literature | 30 days | same |
+| Single documents: decisions, legislative reasons, Constitutional Court case-file documents, gazette records and draft notices, statistical tables, literature | 30 days | same |
+| Interpretations and precedents (may be discontinued later) | 7 days | same |
 | Local regulations, treaties, exchange rules | 7 days | same |
 | Ministry of Justice common statistics | 1 day | same |
 | Bill texts, NCL-licensed full texts | not cached | — |
+| Consumer Protection Committee, Control Yuan sunshine-law and BSMI interpretation lists | 1 day | memory (refetched after a server restart) |
 | English translations, National Land Management Agency letters, IPO copyright interpretations | refreshed weekly (IPO daily) | `en_laws.zip`, `en_orders.zip`, `nlma_interpcomp.json`, `tipo_copyright.xml` in the user data directory |
 | 釋字 / 憲判字 | bundled data (never expires) | `mcp_server/data/old_cases.json`, `new_cases.json`, `opinions.zip` |
 
@@ -879,6 +910,7 @@ mcp-taiwan-legal-db/
     ├── server.py          # MCPServer entry — defines the 26 @mcp.tool() functions
     ├── config.py          # URLs, court codes, cache TTLs, allowed domains
     ├── updater.py         # Standalone pcode_all.json refresh script
+    ├── healthcheck.py     # Live health check of the official sources (python -m mcp_server.healthcheck)
     ├── cache/db.py        # SQLite cache layer
     ├── data/
     │   ├── pcode_all.json          # 11,700+ regulations (bundled, ~780 KB)
@@ -918,6 +950,16 @@ mcp-taiwan-legal-db/
 .venv/bin/pip install -e ".[dev]"
 .venv/bin/pytest mcp_server/tests/ -v
 ```
+
+The unit tests mock the official sites, so they cannot tell when a site changes. Before a release, or when someone reports a source returning nothing, run the live health check: it queries each source once, fetches the first full text, and confirms the validity marking still reads on a few interpretations known to be discontinued.
+
+```bash
+.venv/bin/python -m mcp_server.healthcheck                          # everything (about 130 checks, a few minutes)
+.venv/bin/python -m mcp_server.healthcheck interpretations mof mol  # one tool, some sources
+.venv/bin/python -m mcp_server.healthcheck status                   # validity markings only
+```
+
+Each line is `OK`, `THIN` (very little text came back), `EMPTY` (no results) or `FAIL`; the exit code is 1 if anything is `EMPTY` or `FAIL`.
 
 ---
 

@@ -29,7 +29,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from mcp_server.cache.db import CacheDB
-from mcp_server.tools import fint
+from mcp_server.tools import fint, tls
 from mcp_server.tools._errors import error_response
 from mcp_server.tools.agency_interpretations import _date, _text
 from mcp_server.tools.pdf_text import pdf_to_text
@@ -586,7 +586,25 @@ _GLRS_SITES = {
     "taitung": ("臺東縣", "https://law.taitung.gov.tw/", ()),
     "penghu": ("澎湖縣", "https://law.penghu.gov.tw/glrsnewsout/", ()),
     "kinmen": ("金門縣", "https://law.kinmen.gov.tw/", ()),
+    "taoyuan": ("桃園市", "https://law.tycg.gov.tw/", ("桃市",)),
+    "keelung": ("基隆市", "https://exlaw.klcg.gov.tw/", (), tls.TWCA_SECURE_SSL_CA),  # 伺服器沒送中繼憑證
+    "yilan": ("宜蘭縣", "https://glrslaw.e-land.gov.tw/", (), tls.TWCA_SSL_CA_2023),
+    "nantou": ("南投縣", "https://glrs.nantou.gov.tw/", ()),
+    "hualien": ("花蓮縣", "https://glrs.hl.gov.tw/glrsout/", ()),
+    "lienchiang": ("連江縣", "https://law.matsu.gov.tw/", ("馬祖",)),
 }
+
+
+def _with_tls(fn, *pems: str):
+    """伺服器沒送中繼憑證的站：另開一條附上中繼憑證的連線。"""
+    if not pems:
+        return fn
+
+    async def call(http: httpx.AsyncClient, *args):
+        async with httpx.AsyncClient(timeout=60.0, headers=http.headers, follow_redirects=True,
+                                     verify=tls.context_with(*pems)) as own:
+            return await fn(own, *args)
+    return call
 
 
 def _county_aliases(name: str, *extra: str) -> tuple[str, ...]:
@@ -598,8 +616,9 @@ def _county_aliases(name: str, *extra: str) -> tuple[str, ...]:
 SOURCES = {
     "taipei": ("臺北市", _county_aliases("臺北市", "北市"), _taipei_search, _taipei_get),
     "ntpc": ("新北市", _county_aliases("新北市"), _ntpc_search, _ntpc_get),
-    **{key: (name, _county_aliases(name, *extra), partial(_glrs_search, base, name), partial(_glrs_get, base, name))
-       for key, (name, base, extra) in _GLRS_SITES.items()},
+    **{key: (name, _county_aliases(name, *extra), _with_tls(partial(_glrs_search, base, name), *pems),
+             _with_tls(partial(_glrs_get, base, name), *pems))
+       for key, (name, base, extra, *pems) in _GLRS_SITES.items()},
     "moj_treaty": ("全國法規資料庫條約協定", ("條約", "協定", "條約協定", "全國法規資料庫"),
                    _moj_treaty_search, _moj_treaty_get),
     "mofa": ("外交部條約協定資料庫", ("條約", "協定", "條約協定", "外交部"), _mofa_search, _mofa_get),

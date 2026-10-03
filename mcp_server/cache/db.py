@@ -165,9 +165,9 @@ class CacheDB:
         logger.debug("裁判書快取未命中: key=%s", key[:30])
         return None
 
-    async def set_judgment(self, key: str, data: dict, source: str = "unknown"):
-        """寫入裁判書快取（永久）"""
-        exp = _expires_at(CACHE_JUDGMENT_TTL)
+    async def set_judgment(self, key: str, data: dict, source: str = "unknown", ttl: int | None = None):
+        """寫入裁判書快取（預設 30 天）"""
+        exp = _expires_at(ttl if ttl is not None else CACHE_JUDGMENT_TTL)
         await self.db.execute(
             "INSERT OR REPLACE INTO judgment_cache (cache_key, data_json, source, expires_at) VALUES (?, ?, ?, ?)",
             (key, json.dumps(data, ensure_ascii=False), source, exp),

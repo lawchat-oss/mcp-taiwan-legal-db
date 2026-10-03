@@ -57,7 +57,8 @@ def test_resolve_sources_aliases():
     assert orx.resolve_sources("租稅協定") == ["mof_tax"]
     assert set(orx.resolve_sources("條約")) == {"moj_treaty", "mofa"}
     assert orx.resolve_sources("證交所 櫃買中心 期交所") == ["twse", "tpex", "taifex"]
-    assert orx.resolve_sources("桃園") is None
+    assert orx.resolve_sources("桃園") == ["taoyuan"] and orx.resolve_sources("馬祖") == ["lienchiang"]
+    assert orx.resolve_sources("雲林") is None  # Cloudflare 擋住，沒有收
     assert orx.resolve_sources("") == list(S)
 
 

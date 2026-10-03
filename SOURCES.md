@@ -34,7 +34,7 @@ All data in this project is sourced from public databases run by Taiwan governme
 
 ## 5. 行政機關函釋與審查基準 / Administrative Interpretations and Examination Guidelines
 
-查詢時即時取得各機關官方系統，不建本機資料庫（國土管理署、智慧局著作權函釋官方只提供全量清單，下載到使用者資料目錄後在本機比對）：
+查詢時即時取得各機關官方系統，不建本機資料庫（國土管理署、智慧局著作權函釋官方只提供全量清單，下載到使用者資料目錄後在本機比對；消保處、監察院陽光法令、標準檢驗局的清單只有幾百筆，每天抓一次在記憶體比對）。官網有效力標示的（停止適用、廢止、現行），結果帶 `status` 欄位，詳見 README：
 
 | 機關 / Agency | URL | Coverage |
 |---|---|---|
@@ -43,8 +43,11 @@ All data in this project is sourced from public databases run by Taiwan governme
 | 衛生福利部 | https://mohwlaw.mohw.gov.tw | 行政函釋（robots.txt 不允許爬蟲；僅使用者觸發的單次查詢） |
 | 環境部 | https://oaout.moenv.gov.tw/law/ | 行政函釋 |
 | 行政院公共工程委員會 | https://planpe.pcc.gov.tw/prms/explainLetter/readPrmsExplainLetterSearch | 政府採購法規解釋函令 |
-| 財政部 | https://ttc.mof.gov.tw | 各稅法令函釋（法令彙編、新頒令釋） |
+| 財政部 | https://ttc.mof.gov.tw | 各稅法令函釋（法令彙編、新頒令釋、函釋免列及節錄理由） |
+| 財政部 | https://law-out.mof.gov.tw/ | 主管法規查詢系統：財政部與關務署、國有財產署、國庫署的行政規則（核釋令） |
+| 經濟部 | https://law.moea.gov.tw/ | 主管法規查詢系統：經濟部本部與所屬機關的行政規則（解釋令） |
 | 經濟部商業發展署 | https://gcis.nat.gov.tw/elaw/ | 公司法、商業登記法、商業會計法、有限合夥法函釋 |
+| 經濟部標準檢驗局 | https://www.bsmi.gov.tw/lawVue/ | 解釋函令（取自該系統的 JSON API；只收標示公開且有內容的） |
 | 經濟部智慧財產局 | https://www.tipo.gov.tw/public/Data/data_output_1.xml | 著作權解釋令函（開放資料） |
 | 經濟部智慧財產局 | https://www.tipo.gov.tw/tw/patents/997.html 、https://www.tipo.gov.tw/tw/trademarks/576.html | 專利審查基準（網頁版全文）、商標審查基準（PDF）；只比對標題 |
 | 內政部戶政司 | https://www.ris.gov.tw/info-lawsExplained/app/aw0711/toMain | 戶政法令解釋 |
@@ -60,10 +63,21 @@ All data in this project is sourced from public databases run by Taiwan governme
 | 原住民族委員會 | https://law.cip.gov.tw/ | 行政規則（解釋令、函） |
 | 海洋委員會 | https://law.oac.gov.tw/ | 行政規則（解釋令、函） |
 | 公平交易委員會 | https://law.ftc.gov.tw/law/ | 行政規則、行政解釋 |
+| 大陸委員會 | https://law.mac.gov.tw/ | 行政規則（解釋令） |
+| 中央選舉委員會 | https://law.cec.gov.tw/ | 行政函釋、行政規則 |
+| 行政院主計總處 | https://law.dgbas.gov.tw/ | 其他令函、行政規則 |
+| 外交部 | https://law.mofa.gov.tw/ | 行政規則（指名才查） |
+| 國軍退除役官兵輔導委員會 | https://law.vac.gov.tw/vaclaw/ | 行政規則（指名才查） |
+| 核能安全委員會 | https://erss.nusc.gov.tw/law/ | 行政指導、行政規則（指名才查） |
+| 國家發展委員會 | https://theme.ndc.gov.tw/lawout/ | 行政規則（指名才查） |
+| 行政院人事行政總處 | https://law.dgpa.gov.tw/ | 人事法令解釋 |
+| 行政院消費者保護處 | https://www.ey.gov.tw/Page/B68C1CA8857302A2 | 消費者保護法函釋（只比對標題與摘要） |
+| 監察院陽光法令主題網 | https://sunshine.cy.gov.tw/News.aspx?n=24&sms=8862 | 政治獻金法、公職人員利益衝突迴避法、財產申報法的主管機關函釋（只比對標題） |
 | 考試院、銓敘部、保訓會、考選部 | https://law.exam.gov.tw/ | 行政函釋（考試院主管法規共用系統） |
 | 交通部 | https://motclaw.motc.gov.tw/webMotcLaw2018/ | 行政解釋（令、函、公告）；伺服器未送中繼憑證，本工具附上公開的 TWCA 中繼憑證（`mcp_server/tools/tls.py`） |
 | 中央銀行 | https://www.law.cbc.gov.tw/ | 行政令函 |
 | 臺北市政府 | https://laws.gov.taipei/Law/Interpretation/ | 臺北市政府解釋令函，及該系統收錄的中央機關函釋 |
+| 新北市政府 | https://web.law.ntpc.gov.tw/Scripts/SimpleQ2.aspx?C3=E | 新北市政府與中央機關函釋（依類別逐類查詢） |
 | 行政院公報資訊網 | https://gazette.nat.gov.tw | 各機關依行政程序法第 159 條第 2 項第 2 款發布之解釋性規定 |
 
 ## 6. 訴願決定與準司法決定 / Administrative Appeals and Quasi-judicial Decisions
@@ -170,8 +184,14 @@ All data in this project is sourced from public databases run by Taiwan governme
 | 臺東縣 | https://law.taitung.gov.tw/ |
 | 澎湖縣 | https://law.penghu.gov.tw/glrsnewsout/ |
 | 金門縣 | https://law.kinmen.gov.tw/ |
+| 桃園市 | https://law.tycg.gov.tw/ |
+| 基隆市 | https://exlaw.klcg.gov.tw/ （伺服器未送中繼憑證，本工具附上公開的 TWCA 中繼憑證） |
+| 宜蘭縣 | https://glrslaw.e-land.gov.tw/ （同上） |
+| 南投縣 | https://glrs.nantou.gov.tw/ |
+| 花蓮縣 | https://glrs.hl.gov.tw/glrsout/ |
+| 連江縣 | https://law.matsu.gov.tw/ |
 
-桃園市（連線遭重設）、雲林縣（Cloudflare 驗證頁）、基隆市與宜蘭縣（憑證鏈不完整）的法規系統目前無法自動連線，未收錄。
+雲林縣的法規系統有 Cloudflare 驗證頁，無法自動連線，未收錄。
 
 ### 條約協定與交易所規章
 

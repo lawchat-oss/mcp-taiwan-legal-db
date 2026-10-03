@@ -9,7 +9,7 @@
 - **司法院裁判書** — judgment.judicial.gov.tw（全文搜尋 + 取得，附歷審清單）
 - **全國法規資料庫** — law.moj.gov.tw（11,700+ 部法規，含官方英譯、最新公布日與施行日註記）
 - **憲法法庭** — cons.judicial.gov.tw（871 筆大法官解釋 + 憲判字，含理由書全文，離線快取；受理中案件、言詞辯論、法庭之友與卷內書狀即時查詢）
-- **行政機關函釋** — 法務部、勞動部、衛福部、財政部、經濟部、內政部、金管會、交通部、中央銀行、考試院系統、臺北市等約 30 個官方來源，含智慧局專利、商標審查基準（即時查詢）
+- **行政機關函釋** — 法務部、勞動部、衛福部、財政部、經濟部、內政部、金管會、交通部、中央銀行、人事總處、消保處、考試院系統、臺北市、新北市等 45 個官方來源，含智慧局專利、商標審查基準；標出官網的「停止適用」與「現行」標示（即時查詢）
 - **判解** — 司法院法學資料檢索系統（最高法院決議、法律問題座談、停止適用判例、院字／院解字、大法庭、精選裁判）
 - **訴願與準司法決定** — 行政院、各部會與縣市政府訴願決定，公平會處分書、勞動部不當勞動行為裁決、保訓會復審／再申訴決定、金管會裁罰、工程會採購申訴、監察院案件、律師懲戒決議
 - **立法資料** — 每一條歷次修正的條文與立法理由、立法歷程、立法院議案（含審查中草案）與公報紀錄、法規命令草案預告
@@ -134,8 +134,8 @@ Tools: ['search_judgments', 'get_judgment', 'query_regulation', 'get_pcode', 'se
 
 | 工具 | 用途 | 典型呼叫 |
 |---|---|---|
-| `search_agency_interpretations` | 搜尋各機關行政函釋與智慧局審查基準（約 30 個官方來源，即時查詢） | `search_agency_interpretations(keyword="加班費", agency="勞動部")` |
-| `get_agency_interpretation` | 取得函釋全文（主旨、說明、相關法條、編註） | `get_agency_interpretation("moj:FE393340")` |
+| `search_agency_interpretations` | 搜尋各機關行政函釋與智慧局審查基準（45 個官方來源，即時查詢；標出停止適用） | `search_agency_interpretations(keyword="加班費", agency="勞動部")` |
+| `get_agency_interpretation` | 取得函釋全文（主旨、說明、相關法條、編註、效力標示） | `get_agency_interpretation("moj:FE393340")` |
 | `search_precedents` | 搜尋決議、法律問題座談、停止適用判例、司法解釋（院字/院解字）、大法庭裁定、精選裁判 | `search_precedents(keyword="借名登記", category="決議")` |
 | `get_precedent` | 取得判解全文（含編註，例如「不再援用」） | `get_precedent("D:A,20170214,001")` |
 
@@ -368,7 +368,7 @@ get_constitutional_case_file(document_id="492306")               # 讀單一文�
 <details>
 <summary><b><code>search_agency_interpretations</code> / <code>get_agency_interpretation</code></b></summary>
 
-各機關函釋分散在各自的系統，沒有共用 API。這個工具在查詢當下同時向下列官方系統查詢（共 31 個來源），合併後依發文日期排序；同一件函釋在多個來源出現時只保留一筆（以機關自己的系統為準）：
+各機關函釋分散在各自的系統，沒有共用 API。這個工具在查詢當下同時向下列官方系統查詢（共 45 個來源；外交部、退輔會、核安會、國發會的行政規則多為內部作業要點，只在 `agency` 指名時查），合併後依發文日期排序；同一件函釋在多個來源出現時只保留一筆（以機關自己的系統為準）：
 
 | 來源 | 內容 |
 |---|---|
@@ -378,14 +378,21 @@ get_constitutional_case_file(document_id="492306")               # 讀單一文�
 | 環境部主管法規查詢系統 | 行政函釋 |
 | 工程會政府採購法規解釋函令 | 採購法令解釋令、函 |
 | 財政部各稅法令函釋檢索系統 | 稅務法令彙編、新頒令釋 |
+| 財政部主管法規查詢系統 | 財政部與關務署、國有財產署、國庫署的核釋令與行政規則 |
+| 經濟部主管法規查詢系統 | 經濟部本部及水利署、標準檢驗局、國際貿易署等的解釋令與行政規則 |
 | 經濟部商業發展署 商工行政法規 | 公司法、商業登記法、商業會計法、有限合夥法函釋 |
 | 經濟部智慧財產局 | 著作權解釋令函；專利審查基準（網頁版全文）、商標審查基準（PDF） |
+| 經濟部標準檢驗局 | 解釋函令（商品檢驗、度量衡等） |
+| 行政院人事行政總處 | 人事法令解釋（公務員任用、給與、休假等） |
+| 行政院消費者保護處 | 消費者保護法函釋與法規諮詢意見（只比對標題與摘要） |
+| 監察院陽光法令主題網 | 政治獻金法、公職人員利益衝突迴避法、財產申報法的主管機關函釋（只比對標題） |
 | 內政部戶政司、國土管理署、地政司、消防署 | 戶籍與國籍、建築管理與都市計畫、地政（含已停止適用）、消防法令解釋 |
 | 交通部法規系統 | 行政解釋（令、函、公告） |
 | 中央銀行法規系統 | 行政令函 |
 | 考試院主管法規共用系統 | 銓敘部、保訓會、考選部、考試院行政函釋 |
-| 各部會主管法規共用系統 | 金管會、教育部、農業部、內政部、文化部、國科會、原民會、海委會、公平會的行政規則（解釋令、函收在這一類，結果會混有一般行政規則） |
+| 各部會主管法規共用系統 | 金管會、教育部、農業部、內政部、文化部、國科會、原民會、海委會、公平會、陸委會、中選會（含行政函釋）、主計總處的行政規則（解釋令、函收在這一類，結果會混有一般行政規則）；外交部、退輔會、核安會、國發會只在指名時查 |
 | 臺北市法規查詢系統 | 臺北市政府解釋令函，以及該系統收錄的中央機關函釋 |
+| 新北市法規查詢系統 | 新北市政府與中央機關函釋（依筆數取前 5 類列出，其餘只列筆數） |
 | 司法院法學資料檢索系統 | 跨機關行政函釋（司法院、法務部及其他機關） |
 | 行政院公報 | 各機關依行政程序法第 159 條第 2 項第 2 款發布的解釋性規定（國發會、NCC 等沒有專屬函釋系統的機關從這裡查） |
 
@@ -399,6 +406,8 @@ search_agency_interpretations(keyword="私募", agency="金管會")
 search_agency_interpretations(keyword="時效取得", agency="地政司")
 search_agency_interpretations(keyword="考績", agency="銓敘部")
 search_agency_interpretations(keyword="專利要件", agency="專利")   # 智慧局審查基準只比對章名
+search_agency_interpretations(keyword="加班費", agency="人事總處")
+search_agency_interpretations(keyword="關係人", agency="陽光法令")
 
 # 用發文字號找
 search_agency_interpretations(doc_number="法律字第11403512580號")
@@ -406,6 +415,17 @@ search_agency_interpretations(doc_number="法律字第11403512580號")
 # 讀全文（id 取自搜尋結果）
 get_agency_interpretation("moj:FE393340")
 ```
+
+**效力標示**：結果與全文的 `status` 是官網對該筆資料的標示，引用前必看。
+
+| status | 意思 |
+|---|---|
+| `停止適用` | 官網標示已停止適用或廢止；`status_note` 附停止日期、依據的函或原標示（例如「本筆資料，依據…號函，自…停止適用」） |
+| `部分停止適用` | 交通部的標示 |
+| `適用中` | 只在官網有「現行／停止適用」兩態欄位的來源出現（勞動部、衛福部、考試院系統、環境部、地政司、各部會主管法規共用系統的行政規則）；財政部法令彙編收錄的函釋也標「適用中」（經重新研審保留適用，彙編後才廢止的官網不另標示） |
+| 沒有 `status` | 官網沒有標示或沒標示，**不代表仍然有效**。戶政司、消防署、智慧局、行政院公報等官網完全沒有效力欄位；法務部、工程會、司法院法學檢索、臺北市、央行、交通部只標停止的，沒標的不確定 |
+
+官網偶有漏標或重複登錄（例如人事總處同一件函有一筆標停止、一筆沒標），引用前請讀全文、留意 `notes`（編註）與後續函釋。
 
 回傳的 `categories` 列出每個來源／類別的總筆數與是否有下一頁；某個來源暫時連不上時，該類別帶 `error`，其他來源照常回傳。全文省略正本、副本受文者清單。國土管理署與智慧局著作權函釋官方只提供全量清單，第一次查詢會下載到使用者資料目錄（分別約 16 MB、13 MB），之後每週／每天更新一次。每個來源各自分頁（多數每頁 20 筆，部分 10 或 25 筆）。消防署只能查摘要，函文是掃描 PDF 附件。
 </details>
@@ -564,7 +584,7 @@ get_legal_literature("ncl:A15001353")           # 書目、摘要；有授權時
 
 | 類別 | 來源 |
 |---|---|
-| 地方自治法規 | 臺北市、新北市、臺中市、高雄市、臺南市、新竹縣市、苗栗縣、彰化縣、嘉義縣市、屏東縣、臺東縣、澎湖縣、金門縣（只收現行法規；桃園、雲林、基隆、宜蘭等縣市官網目前無法自動連線，未收錄） |
+| 地方自治法規 | 臺北市、新北市、桃園市、臺中市、臺南市、高雄市、基隆市、新竹縣市、苗栗縣、彰化縣、南投縣、嘉義縣市、屏東縣、宜蘭縣、花蓮縣、臺東縣、澎湖縣、金門縣、連江縣（只收現行法規；雲林縣官網有 Cloudflare 驗證，未收錄） |
 | 條約及協定 | 全國法規資料庫條約（只比對名稱）、外交部條約協定資料庫（部分舊約是掃描檔，只有 PDF 連結）、財政部所得稅協定 |
 | 交易所規章 | 臺灣證券交易所、證券櫃檯買賣中心、臺灣期貨交易所（櫃買、期交所規章取自證基會法規系統，僅供查閱、不得轉載） |
 
@@ -590,6 +610,8 @@ get_other_regulation("taichung:GL001385", article_no="3")   # 臺中市殯葬管
 「釋字 748 引用了哪些先前的釋字」
 「查 111 年憲判字第 1 號」
 「勞動部對加班費有哪些函釋」
+「財政部對股利的函釋，哪些已經停止適用」
+「公務員未休假加班費，人事總處怎麼解釋」
 「工程會對不發還押標金有什麼解釋」
 「最高法院有沒有關於借名登記的決議」
 「查院解字第 3829 號」
@@ -754,6 +776,12 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 | 工程會政府採購法規解釋函令 | planpe.pcc.gov.tw | 採購法令解釋令、函 |
 | 財政部各稅法令函釋檢索系統 | ttc.mof.gov.tw | 稅務法令彙編、新頒令釋 |
 | 經濟部商業發展署 | gcis.nat.gov.tw | 商工行政法規函釋 |
+| 財政部主管法規查詢系統 | law-out.mof.gov.tw | 財政部、關務署、國有財產署、國庫署核釋令與行政規則 |
+| 經濟部主管法規查詢系統 | law.moea.gov.tw | 經濟部本部與所屬機關解釋令、行政規則 |
+| 經濟部標準檢驗局 | www.bsmi.gov.tw | 解釋函令 |
+| 行政院人事行政總處 | law.dgpa.gov.tw | 人事法令解釋 |
+| 行政院消費者保護處 | www.ey.gov.tw | 消保法函釋 |
+| 監察院陽光法令主題網 | sunshine.cy.gov.tw | 政治獻金法、利益衝突迴避法、財產申報法函釋 |
 | 經濟部智慧財產局 | www.tipo.gov.tw | 著作權解釋令函（開放資料）、專利與商標審查基準 |
 | 內政部戶政司 | www.ris.gov.tw | 戶政法令解釋 |
 | 內政部國土管理署 | www.nlma.gov.tw | 解釋函彙編 |
@@ -761,10 +789,11 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 | 內政部消防署 | law.nfa.gov.tw | 消防法令解釋 |
 | 環境部主管法規查詢系統 | oaout.moenv.gov.tw | 行政函釋 |
 | 考試院主管法規共用系統 | law.exam.gov.tw | 銓敘部、保訓會、考選部、考試院函釋 |
-| 各部會主管法規共用系統 | law.fsc.gov.tw、edu.law.moe.gov.tw、law.moa.gov.tw、glrs.moi.gov.tw、law.moc.gov.tw、law.nstc.gov.tw、law.cip.gov.tw、law.oac.gov.tw、law.ftc.gov.tw | 金管會、教育部、農業部、內政部、文化部、國科會、原民會、海委會、公平會的行政規則（解釋令、函） |
+| 各部會主管法規共用系統 | law.fsc.gov.tw、edu.law.moe.gov.tw、law.moa.gov.tw、glrs.moi.gov.tw、law.moc.gov.tw、law.nstc.gov.tw、law.cip.gov.tw、law.oac.gov.tw、law.ftc.gov.tw、law.mac.gov.tw、law.cec.gov.tw、law.dgbas.gov.tw、law.mofa.gov.tw、law.vac.gov.tw、erss.nusc.gov.tw、theme.ndc.gov.tw | 金管會、教育部、農業部、內政部、文化部、國科會、原民會、海委會、公平會、陸委會、中選會、主計總處、外交部、退輔會、核安會、國發會的行政規則（解釋令、函） |
 | 交通部法規系統 | motclaw.motc.gov.tw | 行政解釋 |
 | 中央銀行法規系統 | www.law.cbc.gov.tw | 行政令函、訴願決定 |
 | 臺北市法規查詢系統 | laws.gov.taipei | 函釋、訴願決定、地方法規 |
+| 新北市法規查詢系統 | web.law.ntpc.gov.tw | 函釋、訴願決定、地方法規 |
 | 行政院公報資訊網 | gazette.nat.gov.tw | 各機關解釋性規定、法規命令草案預告 |
 | 行政院訴願審議委員會 | appeal.ey.gov.tw | 訴願決定書 |
 | 公平交易委員會 | www.ftc.gov.tw | 處分書及不處分決議書 |
@@ -784,7 +813,7 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 | 政府研究資訊系統 GRB | www.grb.gov.tw、grbdef.stpi.niar.org.tw | 研究計畫書目與摘要 |
 | 中研院法律學研究所 | www.iias.sinica.edu.tw | 中研院法學期刊全文 |
 | 政治大學法學院 | review.law.nccu.edu.tw | 政大法學評論全文 |
-| 縣市法規查詢系統 | web.law.ntpc.gov.tw、law.taichung.gov.tw、outlaw.kcg.gov.tw、law01.tainan.gov.tw、hclaw.hsinchu.gov.tw、law.hccg.gov.tw、law.miaoli.gov.tw、lawsearch.chcg.gov.tw、law.cyhg.gov.tw、law.chiayi.gov.tw、ptlaw.pthg.gov.tw、law.taitung.gov.tw、law.penghu.gov.tw、law.kinmen.gov.tw | 自治條例、自治規則等地方法規（臺北市見上） |
+| 縣市法規查詢系統 | law.tycg.gov.tw、law.taichung.gov.tw、outlaw.kcg.gov.tw、law01.tainan.gov.tw、exlaw.klcg.gov.tw、hclaw.hsinchu.gov.tw、law.hccg.gov.tw、law.miaoli.gov.tw、lawsearch.chcg.gov.tw、glrs.nantou.gov.tw、law.cyhg.gov.tw、law.chiayi.gov.tw、ptlaw.pthg.gov.tw、glrslaw.e-land.gov.tw、glrs.hl.gov.tw、law.taitung.gov.tw、law.penghu.gov.tw、law.kinmen.gov.tw、law.matsu.gov.tw | 自治條例、自治規則等地方法規（臺北市、新北市見上） |
 | 外交部條約協定資料庫 | no06.mofa.gov.tw | 條約協定 |
 | 財政部 | www.mof.gov.tw | 所得稅協定 |
 | 臺灣證券交易所 法規分享知識庫 | twse-regulation.twse.com.tw | 證交所規章 |
@@ -818,10 +847,12 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 | pcode metadata | 30 天 | 同上 |
 | 歷審清單 | 24 小時（與判決全文分開） | 同上 |
 | 憲法法庭案件清單、卷宗頁 | 1 天 | 同上 |
-| 單篇全文：函釋、判解、決定書、立法理由、憲法法庭卷內文書、公報與草案預告、統計表、研究文獻 | 30 天 | 同上 |
+| 單篇全文：決定書、立法理由、憲法法庭卷內文書、公報與草案預告、統計表、研究文獻 | 30 天 | 同上 |
+| 函釋、判解全文（可能事後停止適用） | 7 天 | 同上 |
 | 地方法規、條約、交易所規章 | 7 天 | 同上 |
 | 法務統計常用統計表 | 1 天 | 同上 |
 | 議案全文、國家圖書館授權全文 | 不快取 | — |
+| 消保處、監察院陽光法令、標準檢驗局的函釋清單 | 1 天 | 記憶體（伺服器重啟即重抓） |
 | 官方英譯、國土管理署解釋函、智慧局著作權函釋 | 每週更新（智慧局每天） | 使用者資料目錄的 `en_laws.zip`、`en_orders.zip`、`nlma_interpcomp.json`、`tipo_copyright.xml` |
 | 釋字/憲判字 | 本地資料（不過期） | `mcp_server/data/old_cases.json`、`new_cases.json`、`opinions.zip` |
 
@@ -856,6 +887,7 @@ mcp-taiwan-legal-db/
     ├── server.py          # MCPServer 入口 — 定義 26 個 @mcp.tool() function
     ├── config.py          # URL、法院代碼、快取 TTL、allowed domains
     ├── updater.py         # 獨立的 pcode_all.json 更新 script
+    ├── healthcheck.py     # 官方來源即時健康檢查（python -m mcp_server.healthcheck）
     ├── cache/db.py        # SQLite 快取層
     ├── data/
     │   ├── pcode_all.json          # 11,700+ 部法規（內建，~780 KB）
@@ -895,6 +927,16 @@ mcp-taiwan-legal-db/
 .venv/bin/pip install -e ".[dev]"
 .venv/bin/pytest mcp_server/tests/ -v
 ```
+
+單元測試以 MockTransport 模擬官網，看不出官網改版。發版前、或有人回報某個來源查不到東西時，跑即時健康檢查：每個來源實際查一次、再取第一筆全文，並用幾件已知停止適用的函釋確認效力標示還讀得到。
+
+```bash
+.venv/bin/python -m mcp_server.healthcheck                          # 全部（約 130 項，幾分鐘）
+.venv/bin/python -m mcp_server.healthcheck interpretations mof mol  # 只查指定工具與來源
+.venv/bin/python -m mcp_server.healthcheck status                   # 只查效力標示
+```
+
+結果每列標 `OK`、`THIN`（取回的文字偏短）、`EMPTY`（查無結果）或 `FAIL`；有 `EMPTY` 或 `FAIL` 時 exit code 為 1。
 
 ---
 

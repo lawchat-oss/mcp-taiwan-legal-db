@@ -93,6 +93,15 @@ def _rows(container) -> list[tuple[str, object]]:
     return out
 
 
+def _fei(el) -> dict:
+    """「廢」標示（title：本函釋已廢止或不再援用）抽出來，不然會混進字號；沒標示不代表確認仍適用。"""
+    fei = el.select_one("span.fei")
+    if fei is None:
+        return {}
+    fei.extract()
+    return {"status": "停止適用", "status_note": fei.get("title") or _text(fei)}
+
+
 def _item_id(href: str) -> str:
     q = parse_qs(urlparse(href).query)
     return f"{q['ty'][0]}:{q['id'][0]}"
@@ -146,6 +155,7 @@ async def search(
                     link = tr.select_one("a#hlTitle")
                     if not link:
                         continue
+                    status = _fei(tr)
                     fields = _rows(tr)
                     item_id = _item_id(urljoin(BASE, link["href"]))
                     item = {
@@ -158,6 +168,7 @@ async def search(
                             "",
                         ),
                     }
+                    item.update(status)
                     if ty == "J":
                         item["reference_value"] = item_id.partition(":")[2].split(",")[0] in REFERENCE_VALUE_CODES
                     items.append(item)
@@ -183,6 +194,7 @@ async def get(http: httpx.AsyncClient, item_id: str) -> dict:
     table = soup.select_one(".col-xs-8 .int-table") or soup.select_one(".int-table")
     if table is None:
         raise LookupError(item_id)
+    status = _fei(table)
     fields: dict[str, str] = {}
     full = ""
     for label, td in _rows(table):
@@ -201,6 +213,7 @@ async def get(http: httpx.AsyncClient, item_id: str) -> dict:
         "fields": fields,
         "full_text": full,
         "related_laws": related,
+        **status,
         "attachments": [
             {"title": _text(a), "url": urljoin(str(r.url), a["href"])}
             for a in soup.select("a[href*='GetFile']")
@@ -250,7 +263,7 @@ class PrecedentClient:
         return result
 
     async def get(self, precedent_id: str) -> dict:
-        cache_key = f"fint:{precedent_id}"
+        cache_key = f"fint:v2:{precedent_id}"  # v2 起有「廢」標示（不再援用），舊快取沒有
         cached = await self.cache.get_judgment(cache_key)
         if cached:
             return {"success": True, "cached": True, **cached}
@@ -262,5 +275,5 @@ class PrecedentClient:
             return error_response(f"司法院法學資料檢索系統連線失敗：{type(e).__name__}: {e}")
         full = data["full_text"]
         data = {"id": precedent_id, **data, "full_text": full[:20000], "full_text_truncated": len(full) > 20000}
-        await self.cache.set_judgment(cache_key, data, source="fint")
+        await self.cache.set_judgment(cache_key, data, source="fint", ttl=7 * 86400)  # 判例可能事後不再援用
         return {"success": True, "cached": False, **data}
