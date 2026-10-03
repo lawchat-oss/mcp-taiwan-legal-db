@@ -1,4 +1,5 @@
-"""行政救濟與處分決定查詢：行政院訴願決定、公平交易委員會處分書
+"""行政救濟與處分決定查詢：行政院訴願決定、公平交易委員會處分書，以及 quasi_judicial 的準司法機關決定、
+appeals 的各部會與地方政府訴願決定
 
 兩者全文都只有 PDF（行政院 108 年以前收辦的案件是 HTML）；查詢時即時向官方網站取得、擷取文字。
 決定 id 一律為「來源代碼:原站識別碼」，例如 ey:A-115-000633、ftc:73ce9ef1-….pdf。
@@ -18,7 +19,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from mcp_server.cache.db import CacheDB
-from mcp_server.tools import fint
+from mcp_server.tools import appeals, fint, quasi_judicial
 from mcp_server.tools._errors import error_response
 from mcp_server.tools.pdf_text import pdf_to_text
 
@@ -217,12 +218,17 @@ async def _ftc_get(http, name: str) -> dict:
 SOURCES = {
     "ey": ("行政院訴願決定", ("訴願", "行政院", "訴願決定"), _ey_search, _ey_get),
     "ftc": ("公平交易委員會處分書", ("公平會", "公平交易委員會", "處分書"), _ftc_search, _ftc_get),
+    **quasi_judicial.SOURCES,
+    **appeals.SOURCES,
 }
+# 不指定來源時查這幾個。工程會申訴審議判斷沒有關鍵字檢索（總數會是整段期間的件數）、監察院（單次查詢可達數十秒）、
+# 律師懲戒（需精確關鍵字）、各部會與地方政府訴願，都要指定才查
+DEFAULT_SOURCES = ("ey", "ftc", "uflb", "csptc", "fsc_sanction")
 
 
 def resolve_sources(source: str) -> list[str] | None:
     if not source.strip():
-        return list(SOURCES)
+        return list(DEFAULT_SOURCES)
     keys = []
     for name in [n for n in re.split(r"[,，、\s]+", source.strip()) if n]:
         hit = [k for k, (label, aliases, *_) in SOURCES.items() if name in (k, label) or name in aliases]
@@ -270,7 +276,7 @@ class AdminDecisionClient:
             "results": results,
             "timestamp": datetime.now().isoformat(),
         }
-        if not any("error" in g for g in groups):
+        if not any("error" in g or g.get("partial") for g in groups):  # 有來源失敗就不快取，下次重試
             await self.cache.set_search(params, result)
         return result
 
@@ -292,5 +298,6 @@ class AdminDecisionClient:
         full = data["full_text"]
         data = {"id": decision_id, "source": label, **data,
                 "full_text": full[:MAX_FULL_TEXT], "full_text_truncated": len(full) > MAX_FULL_TEXT}
-        await self.cache.set_judgment(cache_key, data, source="admin_decision")
+        if full:  # 掃描檔、尚未公開理由的案件不長期快取，日後可能取得全文
+            await self.cache.set_judgment(cache_key, data, source="admin_decision")
         return {"success": True, "cached": False, **data}

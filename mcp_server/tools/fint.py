@@ -26,6 +26,8 @@ USER_AGENT = (
 PAGE_SIZE = 20
 MAX_RESULTS = 500  # 站方上限，超過的頁數回錯誤頁
 
+REFERENCE_VALUE_CODES = ("U", "UU", "V", "S", "US", "T")
+
 # 類別 → (結果頁籤 ty, 進階查詢表單要勾的欄位)
 CATEGORIES: dict[str, tuple[str, dict[str, list[str]]]] = {
     "決議": ("D", {"dtype": ["A", "UA", "B", "C"]}),
@@ -33,9 +35,16 @@ CATEGORIES: dict[str, tuple[str, dict[str, list[str]]]] = {
     "停止適用判例": ("J1", {"jtype1": ["A", "UA", "B", "E"]}),
     "司法解釋": ("C", {"ctype": ["A", "B", "C"]}),
     "大法庭": ("J2", {"jtype2": ["1", "U1", "2", "3"]}),
+    # 站方編輯過、附裁判要旨的各級法院裁判（頁籤名稱「精選裁判」）；代碼依序為民事、家事、刑事、行政、懲戒
+    "精選裁判": ("J", {"jtype": [
+        "C", "U", "S", "G", "O", "I", "UC", "UU", "US", "UG", "UI",
+        "D", "V", "T", "H", "P", "J", "F", "K", "0", "R", "Q", "L",
+    ]}),
+    # 其中最高法院、高等法院暨所屬法院選為「具參考價值」「足資討論」的裁判
+    "具參考價值裁判": ("J", {"jtype": list(REFERENCE_VALUE_CODES)}),
     "行政函釋": ("E", {"etype": ["*"]}),
 }
-_TY_TO_CATEGORY = {ty: name for name, (ty, _) in CATEGORIES.items()}
+_TY_TO_CATEGORY = {ty: name for name, (ty, _) in reversed(CATEGORIES.items())}  # 同一頁籤取第一個名稱
 
 
 def _text(el) -> str:
@@ -138,16 +147,20 @@ async def search(
                     if not link:
                         continue
                     fields = _rows(tr)
-                    items.append({
-                        "id": _item_id(urljoin(BASE, link["href"])),
+                    item_id = _item_id(urljoin(BASE, link["href"]))
+                    item = {
+                        "id": item_id,
                         "title": _text(link),
                         "date": next((roc_date(_text(td)) for label, td in fields if "日期" in label), ""),
                         "summary": next(
                             (unwrap(td.get_text()) for label, td in fields
-                             if "要旨" in label or label in ("解釋文", "決議")),
+                             if "要旨" in label or label in ("解釋文", "決議", "裁判案由")),
                             "",
                         ),
-                    })
+                    }
+                    if ty == "J":
+                        item["reference_value"] = item_id.partition(":")[2].split(",")[0] in REFERENCE_VALUE_CODES
+                    items.append(item)
             groups.append({"category": name, "total": total, "items": items,
                            "has_more": page * PAGE_SIZE < min(total, MAX_RESULTS)})
         return groups
@@ -208,8 +221,10 @@ class PrecedentClient:
 
     async def search(self, keyword: str, category: str, year_from: int, year_to: int, page: int) -> dict:
         names = [c for c in re.split(r"[,，、\s]+", category.strip()) if c] or [
-            c for c in CATEGORIES if c != "行政函釋"  # 函釋由 search_agency_interpretations 查
+            c for c in CATEGORIES if c not in ("行政函釋", "具參考價值裁判")  # 函釋由 search_agency_interpretations 查
         ]
+        if "精選裁判" in names:  # 兩者同一個頁籤，具參考價值裁判是子集
+            names = [c for c in names if c != "具參考價值裁判"]
         unknown = [c for c in names if c not in CATEGORIES]
         if unknown:
             return error_response(f"不支援的類別：{'、'.join(unknown)}", supported_categories=list(CATEGORIES))

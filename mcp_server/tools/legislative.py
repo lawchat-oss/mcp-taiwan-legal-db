@@ -79,6 +79,32 @@ def parse_history(html: str) -> dict[str, list[dict]]:
     return out
 
 
+def parse_process(html: str) -> dict:
+    """「立法歷程」頁（法律最近一次修正的一讀、委員會審查、二讀、三讀）→ {summary, steps}。"""
+    soup = BeautifulSoup(html, "html.parser")
+    text = soup.get_text(" ", strip=True)
+    summary = " ".join(
+        f"{k}{m.group(1)}" for k in ("三讀日期：", "審查委員會：", "公布日期：")
+        if (m := re.search(re.escape(k) + r"\s*(\S+)", text))
+    )
+    steps, seen = [], set()
+    for tr in soup.select("tr"):
+        tds = tr.find_all("td", recursive=False)
+        if len(tds) != 5:
+            continue
+        cells = tuple(td.get_text(" ", strip=True) for td in tds)
+        if not re.fullmatch(r"\d{7}", cells[1]) or cells in seen:  # 頁面上同一張表出現兩次
+            continue
+        seen.add(cells)
+        pdf = tds[2].select_one("a[href*='lypdftxt']")
+        steps.append({
+            "stage": cells[0], "date": _roc7(cells[1]), "gazette": cells[2],
+            "proposer": cells[3], "document": cells[4].strip("()（）"),
+            "gazette_pdf_id": "lispdf:" + pdf["href"].split("xdd!", 1)[1] if pdf and "xdd!" in pdf["href"] else "",
+        })
+    return {"summary": summary, "steps": steps}
+
+
 def _roc7(stamp: str) -> str:
     """「1051206」→ 2016-12-06。"""
     m = re.fullmatch(r"(\d{3})(\d{2})(\d{2})", stamp)
@@ -118,15 +144,36 @@ async def fetch_article_history(law_name: str, article_no: str) -> dict:
             raise ValueError(f"{title} 沒有法條沿革頁")
         history = await http.get(BASE + history_link)
         history.raise_for_status()
+        # 「立法歷程」是頁面上沒有文字的圖示連結，網址固定含 …0000000000000001E…
+        process_link = next(
+            (a["href"] for a in BeautifulSoup(landing.text, "html.parser").select("a[href*=lawsingle]")
+             if re.search(r"0{16}01E", a["href"])),
+            None,
+        )
+        process = None
+        if process_link:
+            try:
+                page = await http.get(BASE + process_link)
+                page.raise_for_status()
+                process = parse_process(page.text)
+            except httpx.HTTPError:
+                process = None
     articles = parse_history(history.text)
     if label not in articles:
         raise KeyError(label)
-    return {
+    result = {
         "law": title,
         "article": label,
         "versions": [{**v, "date": _roc7(v["date"])} for v in articles[label]],
         "source_url": f"{BASE}/lglawc/lglawkm",
     }
+    if process and process["steps"]:
+        result["latest_amendment_process"] = {
+            **process,
+            "note": "這是整部法律最近一次修正的立法歷程，不一定修到本條（本條各版本日期見 versions）。"
+                    "gazette_pdf_id 傳給 get_legislative_record 可讀該次會議的公報紀錄（委員會審查、院會發言）。",
+        }
+    return result
 
 
 class LegislativeHistoryClient:

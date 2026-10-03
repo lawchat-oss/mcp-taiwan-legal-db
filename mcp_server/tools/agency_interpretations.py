@@ -11,6 +11,17 @@
 | gcis | 經濟部商業發展署 商工行政法規 gcis.nat.gov.tw | 公司法、商業登記法等函釋 |
 | ris | 內政部戶政司 www.ris.gov.tw | 戶籍、國籍、姓名等函釋 |
 | nlma | 內政部國土管理署 www.nlma.gov.tw | 建築管理、都市計畫、住宅等解釋函（整份清單下載後在本機比對） |
+| land | 內政部地政司 地政法令 www.land.moi.gov.tw/law | 地政解釋函（含已停止適用；robots.txt 全站禁止，只即時查詢） |
+| nfa | 內政部消防署 law.nfa.gov.tw | 消防法令解釋（只能查摘要；函文是掃描 PDF 附件） |
+| mohw | 衛生福利部 mohwlaw.mohw.gov.tw | 行政函釋 |
+| moenv | 環境部 oaout.moenv.gov.tw | 行政函釋 |
+| mocs、csptc、moex、exam | 考試院主管法規共用系統 law.exam.gov.tw | 銓敘部、保訓會、考選部、考試院行政函釋 |
+| fsc、moe、moa、moi、moc、nstc、cip、oac、ftc | 各部會主管法規共用系統（law.fsc.gov.tw、edu.law.moe.gov.tw 等） | 金管會、教育部、農業部、內政部、文化部、國科會、原民會、海委會、公平會的行政規則（含解釋令、函） |
+| motc | 交通部 motclaw.motc.gov.tw | 行政解釋（令、函、公告） |
+| cbc | 中央銀行 www.law.cbc.gov.tw | 行政令函 |
+| tipo | 經濟部智慧財產局 www.tipo.gov.tw | 著作權解釋令函（開放資料下載後在本機比對） |
+| tipo_guide | 經濟部智慧財產局 www.tipo.gov.tw | 專利審查基準（網頁版全文）、商標審查基準（PDF）；只比對標題（見 ip_guidelines） |
+| taipei | 臺北市法規查詢系統 laws.gov.taipei | 臺北市政府解釋令函，及該系統收錄的中央機關函釋 |
 | fint | 司法院法學資料檢索系統 legal.judicial.gov.tw | 跨機關行政函釋（司法院、法務部等） |
 | gazette | 行政院公報 gazette.nat.gov.tw | 各部會依行政程序法第 159 條第 2 項第 2 款發布的解釋性規定 |
 
@@ -33,6 +44,7 @@ import time
 import zipfile
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from functools import partial
 from urllib.parse import urlencode
 from xml.etree import ElementTree
 
@@ -41,7 +53,7 @@ from bs4 import BeautifulSoup
 
 from mcp_server.cache.db import CacheDB
 from mcp_server.config import USER_DATA_DIR
-from mcp_server.tools import fint
+from mcp_server.tools import fint, ip_guidelines, tls
 from mcp_server.tools._errors import error_response
 
 logger = logging.getLogger(__name__)
@@ -64,8 +76,6 @@ GAZETTE_BASE = "https://gazette.nat.gov.tw/egFront/"
 
 TIPO_XML_URL = "https://www.tipo.gov.tw/public/Data/data_output_1.xml"
 MOHW_BASE = "https://mohwlaw.mohw.gov.tw/FINT/"
-FSC_BASE = "https://law.fsc.gov.tw/"
-MOENV_BASE = "https://oaout.moenv.gov.tw/law/"
 
 # 正本、副本只是受文者清單，佔篇幅又沒有法律內容
 _RECIPIENTS = re.compile(r"\n(?:正[\s　]*本|副[\s　]*本)[\s　]*[：:].*", re.S)
@@ -354,10 +364,38 @@ async def _mohw_get(http: httpx.AsyncClient, native_id: str) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────
-# 金融監督管理委員會（law.fsc.gov.tw，主管法規共用系統）：解釋令、函收在「行政規則」類別
+# 主管法規共用系統（多個部會共用同一套系統）：解釋令、函收在「行政規則」類別，與一般要點混在一起
 # ─────────────────────────────────────────────────────────────
 
-async def _fsc_search(http: httpx.AsyncClient, q: Query) -> list[dict]:
+# 來源代碼 → (網址, 機關)
+_LAWSYS = {
+    "fsc": ("https://law.fsc.gov.tw/", "金融監督管理委員會"),
+    "moe": ("https://edu.law.moe.gov.tw/", "教育部"),
+    "moa": ("https://law.moa.gov.tw/", "農業部"),
+    "moi": ("https://glrs.moi.gov.tw/", "內政部"),
+    "moc": ("https://law.moc.gov.tw/", "文化部"),
+    "nstc": ("https://law.nstc.gov.tw/", "國家科學及技術委員會"),
+    "cip": ("https://law.cip.gov.tw/", "原住民族委員會"),
+    "oac": ("https://law.oac.gov.tw/", "海洋委員會"),
+    "ftc": ("https://law.ftc.gov.tw/law/", "公平交易委員會"),  # 官網「行政解釋」（公研釋）也收在這裡
+}
+_LAWSYS_CATEGORY = "行政規則（含解釋令、函）"
+
+
+def _check_id(native_id: str, pattern: str = r"[0-9]+") -> str:
+    """原站識別碼放進網址前先驗證格式。"""
+    if not re.fullmatch(pattern, native_id):
+        raise LookupError(native_id)
+    return native_id
+
+
+def _plain(el) -> str:
+    """不在標示關鍵字的 <mark>／<strong> 前後插空白（_text 會插）。"""
+    return re.sub(r"\s+", " ", el.get_text()).strip() if el else ""
+
+
+async def _lawsys_search(key: str, http: httpx.AsyncClient, q: Query) -> list[dict]:
+    base, agency = _LAWSYS[key]
     params = {"NLawTypeID": "all", "GroupID": "2", "KW": q.keyword, "name": "1", "content": "1", "page": q.page}
     if q.number_digits:
         params["LNumber"] = q.number_digits
@@ -365,7 +403,7 @@ async def _fsc_search(http: httpx.AsyncClient, q: Query) -> list[dict]:
         params["StartDate"] = q.start
     if q.end:
         params["EndDate"] = q.end
-    r = await http.get(FSC_BASE + "LawResult.aspx", params=params)  # GroupID 才是類別（2 = 行政規則）
+    r = await http.get(base + "LawResult.aspx", params=params)  # GroupID 才是類別（2 = 行政規則）
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
     m = re.search(r"法規類別 全部 (\d+)", soup.get_text(" ", strip=True))
@@ -376,15 +414,16 @@ async def _fsc_search(http: httpx.AsyncClient, q: Query) -> list[dict]:
         rid = re.search(r"id=(\w+)", a["href"]) if a else None
         if rid:
             items.append({
-                "id": f"fsc:{rid.group(1)}", "agency": "金融監督管理委員會", "category": "行政規則（含解釋令、函）",
-                "doc_number": "", "date": _date(_text(tds[1])), "summary": _text(a),
+                "id": f"{key}:{rid.group(1)}", "agency": agency, "category": _LAWSYS_CATEGORY,
+                "doc_number": "", "date": _date(_text(tds[1])), "summary": _plain(a),
             })
     total = int(m.group(1)) if m else len(items)
-    return [_group("金融監督管理委員會", "行政規則（含解釋令、函）", total, items, q.page * 10 < total)]
+    return [_group(agency, _LAWSYS_CATEGORY, total, items, q.page * 10 < total)]
 
 
-async def _fsc_get(http: httpx.AsyncClient, native_id: str) -> dict:
-    url = f"{FSC_BASE}LawContent.aspx?id={native_id}"
+async def _lawsys_get(key: str, http: httpx.AsyncClient, native_id: str) -> dict:
+    base, agency = _LAWSYS[key]
+    url = f"{base}LawContent.aspx?id={_check_id(native_id, '[A-Z]+[0-9]+')}"
     r = await http.get(url)
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
@@ -394,7 +433,7 @@ async def _fsc_get(http: httpx.AsyncClient, native_id: str) -> dict:
     if not fields or body is None:
         raise LookupError(native_id)
     return {
-        "agency": "金融監督管理委員會", "doc_number": _fold(fields.get("發文字號", "")),
+        "agency": agency, "doc_number": _fold(fields.get("發文字號", "")),
         "date": _date(fields.get("公發布日", "")), "summary": fields.get("法規名稱", ""),
         "full_text": _unwrap(body.get_text("\n")),
         "notes": fields.get("法規體系", ""),
@@ -403,41 +442,56 @@ async def _fsc_get(http: httpx.AsyncClient, native_id: str) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────
-# 環境部（oaout.moenv.gov.tw/law）：函釋在獨立的「行政函釋」子系統
+# 主管法規共用系統的「行政函釋」子系統（環境部、考試院）
 # ─────────────────────────────────────────────────────────────
 
-async def _moenv_search(http: httpx.AsyncClient, q: Query) -> list[dict]:
-    params = {"ELType": "6", "KW": q.keyword, "page": q.page}
+EXAM_BASE = "https://law.exam.gov.tw/"
+# 來源代碼 → (網址, 機關, 額外查詢參數)。考試院的系統收院本部與各部會，清單不列機關，以機關分類 Ncid 分開查
+_EXEC = {
+    "moenv": ("https://oaout.moenv.gov.tw/law/", "環境部", {}),
+    "mocs": (EXAM_BASE, "銓敘部", {"Ncid": "03"}),
+    "csptc": (EXAM_BASE, "公務人員保障暨培訓委員會", {"Ncid": "04"}),
+    "moex": (EXAM_BASE, "考選部", {"Ncid": "02"}),
+    "exam": (EXAM_BASE, "考試院", {"Ncid": "01"}),
+}
+
+
+async def _exec_search(key: str, http: httpx.AsyncClient, q: Query) -> list[dict]:
+    base, agency, extra = _EXEC[key]
+    params = {"ELType": "6", "KW": q.keyword, "page": q.page, **extra}  # 沒有 ELType 會被導到錯誤頁
     if q.number_digits:
         params["LNumber"] = q.number_digits
     if q.start:
-        params["StartDate"] = q.start
+        params["StartDate"] = q.start  # 表單顯示民國年，網址參數是西元
     if q.end:
         params["EndDate"] = q.end
-    r = await http.get(MOENV_BASE + "ExecutiveResult.aspx", params=params)
+    r = await http.get(base + "ExecutiveResult.aspx", params=params)
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
     items = []
-    for a in soup.select("a[id$=_aLType]"):
-        rid = re.search(r"id=(\d+)", a.get("href", ""))
-        td = a.find_parent("td")
-        if not rid or td is None:
+    for title in soup.select("div[id$=_divTitle]"):
+        td = title.parent
+        a = td.select_one("a[href*='ExecutiveData.aspx']")  # 環境部連結在標題、考試院在發文字號
+        rid = re.search(r"[?&]id=(\d+)", a.get("href", "")) if a else None
+        if not rid:
             continue
         kv = {
-            _text(d.select_one(".co-th")).rstrip("："): _text(d.select_one(".co-td"))
+            re.sub(r"\s", "", _text(d.select_one(".co-th"))).rstrip("："): d.select_one(".co-td")
             for d in td.find_all("div") if d.select_one(".co-th")
         }
         items.append({
-            "id": f"moenv:{rid.group(1)}", "agency": "環境部", "category": "行政函釋",
-            "doc_number": _fold(kv.get("發文字號", "")), "date": _date(kv.get("發文日期", "")), "summary": _text(a),
+            "id": f"{key}:{rid.group(1)}", "agency": agency, "category": "行政函釋",
+            "doc_number": _fold(_text(kv.get("發文字號"))), "date": _date(_text(kv.get("發文日期"))),
+            "summary": _plain(kv.get("標題")),
         })
     m = re.search(r"共\s*(\d+)\s*筆", soup.get_text())  # 只有一頁時不顯示總筆數
     total = int(m.group(1)) if m else len(items)
-    return [_group("環境部", "行政函釋", total, items, q.page * 10 < total)]
+    return [_group(agency, "行政函釋", total, items, q.page * 10 < total)]
 
 
-async def _moenv_get(http: httpx.AsyncClient, native_id: str) -> dict:
-    url = f"{MOENV_BASE}ExecutiveData.aspx?id={native_id}&type=2"  # 不帶 type=2 只回空殼
+async def _exec_get(key: str, http: httpx.AsyncClient, native_id: str) -> dict:
+    base, agency, _ = _EXEC[key]
+    url = f"{base}ExecutiveData.aspx?id={_check_id(native_id)}&type=2"  # 不帶 type=2 只回空殼
     r = await http.get(url)
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
@@ -446,15 +500,341 @@ async def _moenv_get(http: httpx.AsyncClient, native_id: str) -> dict:
     if "發文字號" not in rows:
         raise LookupError(native_id)
     return {
-        "agency": _text(rows.get("發文機關")) or "環境部", "doc_number": _fold(_text(rows["發文字號"])),
+        "agency": _text(rows.get("發文機關")) or agency, "doc_number": _fold(_text(rows["發文字號"])),
         "date": _date(_text(rows.get("發文日期"))), "summary": _text(rows.get("標題")),
         "full_text": _RECIPIENTS.sub("", _unwrap(rows["內容"].get_text("\n"))) if "內容" in rows else "",
         "related_laws": [x for x in rows["相關法規"].get_text("\n", strip=True).split("\n") if x] if "相關法規" in rows else [],
-        "notes": _text(rows.get("單位業務分類")),
+        "notes": _text(rows.get("單位業務分類") or rows.get("機關分類")),
         "attachments": [
             {"title": _text(a), "url": str(r.url.join(a["href"]))}
             for a in (rows["圖表附件"].select("a[href]") if "圖表附件" in rows else [])
         ],
+        "source_url": url,
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# 清單只有「機關 日期 字號」一行的來源（交通部、中央銀行、臺北市、地政司）共用
+# ─────────────────────────────────────────────────────────────
+
+_HEAD = re.compile(r"^(\D*?)\s*(\d{2,3}\s*[年.]\s*\d{1,2}\s*[月.]\s*\d{1,2})\s*日?\s*\.?\s*(.*)$")
+
+
+def _head(line: str, agency: str) -> dict:
+    """「交通部 114.02.03. 交運字第1140000670號函」「中央銀行113年10月31日台央外伍字第1130040947號令」→ 機關、日期、字號。"""
+    m = _HEAD.match(re.sub(r"[\x00-\x1f\s]+", " ", line).strip())  # 中央銀行舊資料夾帶控制字元
+    if not m:
+        return {"agency": agency, "date": "", "doc_number": _fold(line)}
+    return {"agency": re.sub(r"\s", "", m.group(1)) or agency, "date": _date(m.group(2)), "doc_number": _fold(m.group(3))}
+
+
+def _page_total(page: int, last: int, count: int, size: int) -> int:
+    """站方只給總頁數：在最後一頁算得出確切筆數，否則以頁數估計（上限）。"""
+    return (page - 1) * size + count if page >= last else last * size
+
+
+def _last_page(soup, param: str, page: int) -> int:
+    hrefs = " ".join(a["href"] for a in soup.select(f"a[href*='{param}=']"))
+    return max([int(x) for x in re.findall(rf"[?&]{param}=(\d+)", hrefs)] + [page])
+
+
+# ─────────────────────────────────────────────────────────────
+# 交通部（motclaw.motc.gov.tw）：清單每頁 25 筆、只列機關日期字號。伺服器沒送中繼憑證，連線時附上（見 tls）
+# ─────────────────────────────────────────────────────────────
+
+MOTC_BASE = "https://motclaw.motc.gov.tw/webMotcLaw2018/SLaw/"
+
+
+def _motc_http() -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=60.0, headers={"User-Agent": USER_AGENT}, follow_redirects=True,
+                             verify=tls.context_with(tls.TWCA_SSL_CA_2023))
+
+
+async def _motc_search(http: httpx.AsyncClient, q: Query) -> list[dict]:
+    async with _motc_http() as motc:
+        r = await motc.get(MOTC_BASE + "List", params={
+            "cKeyword": q.keyword, "titleNo": q.number_digits,
+            "startDate": _roc7(q.start), "endDate": _roc7(q.end), "page": q.page,  # 民國 YYYMMDD
+        })
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    items = []
+    for a in soup.select("table.list-result a[href*='soid=']"):
+        soid = re.search(r"soid=(\d+)", a["href"])
+        if soid:
+            items.append({"id": f"motc:{soid.group(1)}", **_head(_text(a), "交通部"), "category": "行政解釋", "summary": ""})
+    last = _last_page(soup, "page", q.page)
+    return [_group("交通部", "行政解釋", _page_total(q.page, last, len(items), 25), items, q.page < last,
+                   note="清單只有機關、日期、字號，主旨與全文請用 get 取得")]
+
+
+async def _motc_get(http: httpx.AsyncClient, native_id: str) -> dict:
+    url = f"{MOTC_BASE}Content?soid={_check_id(native_id)}"
+    async with _motc_http() as motc:
+        r = await motc.get(url)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    head, body = soup.select_one(".con-area-top p span"), soup.select_one(".con-explain pre")
+    if head is None or body is None:
+        raise LookupError(native_id)
+    return {
+        **_head(_text(head), "交通部"), "summary": _text(soup.select_one(".con-explain > p")),
+        "full_text": _RECIPIENTS.sub("", _unwrap(body.get_text())),
+        "source_url": url,
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# 中央銀行（www.law.cbc.gov.tw）：與交通部同一廠商，清單每頁 10 筆
+# ─────────────────────────────────────────────────────────────
+
+CBC_BASE = "https://www.law.cbc.gov.tw/SOrder/"
+# 業務規章、總綱、組織、業務、發行、外匯、國庫、檢查、資訊；站方要求至少勾一類，全勾 = 全部
+_CBC_TYPES = ("1", "3", "4", "5", "16", "10", "17", "22", "47")
+
+
+async def _cbc_search(http: httpx.AsyncClient, q: Query) -> list[dict]:
+    params = [("criteria.lawCheckBoxs", t) for t in _CBC_TYPES] + [
+        ("criteria.keyWord1", q.keyword), ("criteria.number", q.number_digits),
+        ("criteria.starDate", _roc7(q.start)), ("criteria.endDate", _roc7(q.end)), ("criteria.pageNumber", q.page),
+    ]
+    r = await http.get(CBC_BASE + "SearchAgain", params=params)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    items = []
+    for td in soup.select("table.list-result td:has(> a[href*='/SOrder/SOrder/'])"):
+        a = td.select_one("a[href*='/SOrder/SOrder/']")
+        rid = re.search(r"/SOrder/SOrder/(\d+)", a["href"])
+        summary = re.sub(r"\s*\n\s*", "", "".join(a.stripped_strings))  # 開頭「(停)」= 停止適用
+        a.extract()
+        items.append({"id": f"cbc:{rid.group(1)}", **_head(_text(td), "中央銀行"), "category": "行政令函", "summary": summary})
+    pages = [int(o["value"]) for o in soup.select("#currentPageChange option") if o.get("value", "").isdigit()]
+    last = max(pages + [q.page])
+    return [_group("中央銀行", "行政令函", _page_total(q.page, last, len(items), 10), items, q.page < last)]
+
+
+async def _cbc_get(http: httpx.AsyncClient, native_id: str) -> dict:
+    url = f"{CBC_BASE}SOrder/{_check_id(native_id)}"
+    r = await http.get(url)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    head = soup.select_one(".letters-page-content .jumbotron")  # 查無此 id 時回 204 空白
+    if head is None:
+        raise LookupError(native_id)
+    fields = {_text(b).rstrip("："): _text(b.parent)[len(_text(b)):].strip() for b in head.select("b")}
+    parts = []
+    for row in soup.select(".letters-desc-text > div.row"):
+        cells = row.find_all("div", recursive=False)
+        for label, value in zip(cells[::2], cells[1::2]):
+            name = re.sub(r"\s", "", _text(label))
+            if not name.startswith(("正本", "副本")):
+                parts.append(name + _html_text(str(value)))
+    return {
+        **_head(fields.get("發文字號", ""), "中央銀行"), "summary": fields.get("要旨", ""),
+        "full_text": "\n".join(parts),
+        "attachments": [{"title": _text(a), "url": str(r.url.join(a["href"]))}
+                        for a in soup.select(".attact-files-div a[href]")],
+        "source_url": url,
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# 臺北市法規查詢系統（laws.gov.taipei）：臺北市政府的解釋令函，另收中央機關函釋
+# ─────────────────────────────────────────────────────────────
+
+TAIPEI_BASE = "https://laws.gov.taipei/Law/Interpretation/"
+_TAIPEI_CATEGORIES = {"002": "解釋令函（臺北市）", "003": "中央機關解釋令函（臺北市法規查詢系統收錄）"}
+
+
+async def _taipei_search(http: httpx.AsyncClient, q: Query) -> list[dict]:
+    params = {"CaseNumber": q.number_digits, "DateRange.DateFrom": q.start, "DateRange.DateTo": q.end,
+              "showtype": 1, "page": q.page}
+    for i, word in enumerate(q.keyword.split()[:3], 1):  # 站方最多三組關鍵字
+        params[f"SearchString.Keyword{i}"] = word
+        params[f"SearchString.Operaton{i}"] = "AND"
+    out = []
+    for cate, label in _TAIPEI_CATEGORIES.items():
+        r = await http.get(TAIPEI_BASE + "SearchResult", params={**params, "curcateid": cate})
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+        items = []
+        for ul in soup.select("ul.fx-list"):
+            a = ul.select_one("li.num a[href*='/Content/']")
+            fe = re.search(r"/Content/(FE\d+)", a["href"]) if a else None
+            if fe:
+                items.append({"id": f"taipei:{fe.group(1)}", **_head(_text(a), "臺北市政府"), "category": label,
+                              "summary": _text(ul.select_one("li.pre"))})
+        m = re.search(r"共\s*([\d,]+)\s*筆", soup.get_text())
+        total = int(m.group(1).replace(",", "")) if m else len(items)
+        out.append(_group("臺北市政府", label, total, items, q.page * PAGE_SIZE < total))
+    return out
+
+
+async def _taipei_get(http: httpx.AsyncClient, native_id: str) -> dict:
+    url = f"{TAIPEI_BASE}Content/{_check_id(native_id, r'FE[0-9]+')}"
+    r = await http.get(url)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    art = soup.select_one("article.interpretation-content")  # 查無此 id 時頁面沒有這個區塊
+    if art is None:
+        raise LookupError(native_id)
+    rows = {re.sub(r"\s", "", _text(row.select_one(".col-title"))).rstrip("："): row.select_one(".col-data")
+            for row in art.select(".row") if row.select_one(".col-title")}
+    body = art.select_one("pre[title='內容']")
+    head = _head(_text(rows.get("發文字號")), "臺北市政府")
+    return {
+        **head, "date": _date(_text(rows.get("發文日期"))) or head["date"],
+        "summary": _unwrap(rows["要旨"].get_text()) if "要旨" in rows else "",
+        "full_text": _RECIPIENTS.sub("", _unwrap(body.get_text())) if body else "",
+        "notes": _text(soup.select_one("h3.small-subject span")),  # 業務分類
+        "source_url": url,
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# 內政部地政司 地政法令（www.land.moi.gov.tw/law）：robots.txt 全站禁止，只在使用者查詢時即時查一頁。
+# 結果依法條分組、全文直接列在清單；沒有個別函的頁面，取全文是以文號再查一次
+# ─────────────────────────────────────────────────────────────
+
+LAND_URL = "https://www.land.moi.gov.tw/law/Resultdet3/99"
+_DIGITS = str.maketrans("〇○零一二三四五六七八九０１２３４５６７８９", "0001234567890123456789")
+
+
+def _cn_number(m: re.Match) -> str:
+    """國字數字：「八十八」→ 88、「一百零二」→ 102；逐位寫的「八八○六九九八」「０九二００六九九三七」直接換字。"""
+    s = m.group().translate(_DIGITS)
+    if not re.search("[十百]", s):
+        return s
+    n = cur = 0
+    for c in s:
+        if c in "十百":
+            n, cur = n + (cur or 1) * (10 if c == "十" else 100), 0
+        else:
+            cur = int(c)
+    return str(n + cur)
+
+
+def _land_norm(line: str) -> str:
+    """早期的函日期、文號用國字或全形數字（「八十八年六月七日…第八八○六九九八號」），換成阿拉伯數字。"""
+    line = re.sub(r"[0-9０-９〇○零一二三四五六七八九十百]+(?=[年月日號])", _cn_number, line)
+    return line.replace("中華民國", "")
+
+
+def _land_params(keyword: str, number: str, page: int) -> list[tuple]:
+    return [
+        ("showfrom", "y"), ("condition", "eadddate"), ("order1", "desc"), ("Econtent", keyword),
+        ("EctntType_search", "1"), ("EctntType_search", "2"),  # 比對要旨與內容
+        ("lawOnOFF", "2"), ("lawOnOFF", "0"),  # 適用中與已停止適用
+        ("Etext", number), ("PageSize", PAGE_SIZE), ("pagenum", page),
+    ]
+
+
+def _land_parse(soup) -> list[dict]:
+    for k in soup.select("strong.keyword"):  # 關鍵字標示前後多了空白
+        k.replace_with(k.get_text(strip=True))
+    recs = []
+    for box in soup.select("div.main3box"):
+        law, rec = _text(box.select_one(".main_title a")), None
+        for div in box.select("div.main_span"):
+            label = div.find("span", recursive=False)
+            if _text(div.select_one("strong.icon_t")) == "解釋函":
+                rec = {"law": law, "notes": []}
+                recs.append(rec)
+            elif rec is not None and label:
+                rec[_text(label)] = div
+                label.extract()
+            elif rec is not None and _text(div):
+                rec["notes"].append(_text(div))  # 「已停止適用/廢止」
+    out: dict[str, dict] = {}
+    for rec in recs:
+        head = _head(_land_norm(_plain(rec.get("公布日期文號"))), "內政部")
+        number = re.findall(r"\d{3,}", head["doc_number"])
+        if not number:
+            continue
+        item_id = f"land:{number[-1]}:{head['date']}"  # 同號不同機關的舊函以日期區分
+        if item_id in out:  # 同一函列在多個條文下
+            out[item_id]["related_laws"].append(rec["law"])
+            continue
+        stop = rec.get("停止適用日期文號")
+        out[item_id] = {
+            "id": item_id, **head, "category": "地政法令解釋函", "summary": _plain(rec.get("要旨")),
+            "related_laws": [rec["law"]],
+            "notes": "；".join(rec["notes"] + ([f"停止適用：{_land_norm(_plain(stop))}"] if stop else [])),
+            "full_text": _html_text(str(rec["內容"])) if "內容" in rec else "",
+        }
+    return list(out.values())
+
+
+async def _land_search(http: httpx.AsyncClient, q: Query) -> list[dict]:
+    r = await http.get(LAND_URL, params=_land_params(q.keyword, q.number_digits, q.page))
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    m = re.search(r"共有\s*(\d+)\s*筆", soup.get_text(" "))
+    items = [{k: v for k, v in x.items() if k != "full_text"} for x in _land_parse(soup)]
+    total = int(m.group(1)) if m else len(items)
+    note = {"note": "此來源沒有發文日期區間查詢，日期篩選未套用"} if q.start or q.end else {}
+    return [_group("內政部地政司", "地政法令解釋函", total, items, q.page * PAGE_SIZE < total, **note)]
+
+
+async def _land_get(http: httpx.AsyncClient, native_id: str) -> dict:
+    number = _check_id(native_id, r"[0-9]+:[0-9-]*").split(":")[0]
+    params = _land_params("", number, 1)
+    r = await http.get(LAND_URL, params=params)
+    r.raise_for_status()
+    rec = next((x for x in _land_parse(BeautifulSoup(r.text, "html.parser")) if x["id"] == f"land:{native_id}"), None)
+    if rec is None:
+        raise LookupError(native_id)
+    return {
+        **{k: v for k, v in rec.items() if k not in ("id", "category")},
+        "full_text": _RECIPIENTS.sub("", rec["full_text"]), "source_url": f"{LAND_URL}?{urlencode(params)}",
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# 內政部消防署 消防法令查詢系統（law.nfa.gov.tw/GNFA）：只能查摘要；函文只有附件，多為沒有文字層的掃描 PDF
+# ─────────────────────────────────────────────────────────────
+
+NFA_BASE = "https://law.nfa.gov.tw/GNFA/"
+
+
+async def _nfa_search(http: httpx.AsyncClient, q: Query) -> list[dict]:
+    if q.number:
+        return [_group("內政部消防署", "法令解釋", 0, [], False, note="此來源不支援以發文字號查詢")]
+    # 站方對不認得的參數不報錯、直接回未篩選的全部資料，參數名稱不能打錯
+    r = await http.get(NFA_BASE + "index.aspx", params={
+        "type": "d", "abstr": q.keyword, "starDate": _roc7(q.start), "endDate": _roc7(q.end), "pg": q.page,
+    })
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    items = []
+    for tr in soup.select("tr#trRow"):
+        a = tr.select_one("a[href*='news.aspx?id=']")
+        rid = re.search(r"id=(\d+)", a["href"]) if a else None
+        if rid:
+            items.append({
+                "id": f"nfa:{rid.group(1)}", "agency": "內政部消防署", "category": "法令解釋", "doc_number": "",
+                "date": _date(_text(tr.find("td"))), "summary": _text(a),
+            })
+    last = _last_page(soup, "pg", q.page)
+    return [_group("內政部消防署", "法令解釋", _page_total(q.page, last, len(items), 20), items, q.page < last,
+                   note="關鍵字只比對摘要")]
+
+
+async def _nfa_get(http: httpx.AsyncClient, native_id: str) -> dict:
+    url = f"{NFA_BASE}news.aspx?id={_check_id(native_id)}"
+    r = await http.get(url)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    fields = {re.sub(r"\s", "", _text(tr.th)).rstrip("："): tr.td for tr in soup.select("table tr") if tr.th and tr.td}
+    if not _text(fields.get("文號")):  # 查無此 id 時欄位都是空的
+        raise LookupError(native_id)
+    return {
+        "agency": _text(fields.get("發布機關")) or "內政部消防署", "doc_number": _fold(_text(fields["文號"])),
+        "date": _date(_text(fields.get("公發布日"))), "summary": _text(fields.get("摘要")),
+        "full_text": "",
+        "notes": "官網只提供函文附件檔（多為掃描 PDF），全文請開啟 attachments。",
+        "attachments": [{"title": _text(a), "url": str(r.url.join(a["href"]))}
+                        for a in soup.select("a[href*='downloadFile.aspx']")],
         "source_url": url,
     }
 
@@ -1010,6 +1390,13 @@ async def _fint_get(http: httpx.AsyncClient, native_id: str) -> dict:
 # 對外介面
 # ─────────────────────────────────────────────────────────────
 
+def _lawsys(key: str) -> tuple:
+    return partial(_lawsys_search, key), partial(_lawsys_get, key)
+
+
+def _exec(key: str) -> tuple:
+    return partial(_exec_search, key), partial(_exec_get, key)
+
 # 來源代碼 → (名稱, 可用來指定的機關名／別名, search, get)；順序即去重時的優先序（機關自己的系統優先）
 SOURCES = {
     "moj": ("法務部", ("法務部",), _moj_search, _moj_get),
@@ -1019,10 +1406,29 @@ SOURCES = {
     "gcis": ("經濟部商業發展署", ("經濟部", "商業發展署", "商業司"), _gcis_search, _gcis_get),
     "ris": ("內政部戶政司", ("內政部", "戶政司"), _ris_search, _ris_get),
     "nlma": ("內政部國土管理署", ("內政部", "國土管理署", "營建署"), _nlma_search, _nlma_get),
+    "land": ("內政部地政司", ("內政部", "地政司", "地政", "內政部地政司"), _land_search, _land_get),
+    "nfa": ("內政部消防署", ("內政部", "消防署", "內政部消防署"), _nfa_search, _nfa_get),
+    "moi": ("內政部", ("內政部",), *_lawsys("moi")),
     "mohw": ("衛生福利部", ("衛生福利部", "衛福部"), _mohw_search, _mohw_get),
-    "fsc": ("金融監督管理委員會", ("金融監督管理委員會", "金管會"), _fsc_search, _fsc_get),
-    "moenv": ("環境部", ("環境部", "環保署"), _moenv_search, _moenv_get),
+    "fsc": ("金融監督管理委員會", ("金融監督管理委員會", "金管會"), *_lawsys("fsc")),
+    "moenv": ("環境部", ("環境部", "環保署"), *_exec("moenv")),
+    "mocs": ("銓敘部", ("銓敘部", "考試院"), *_exec("mocs")),
+    "csptc": ("公務人員保障暨培訓委員會", ("保訓會", "公務人員保障暨培訓委員會", "考試院"), *_exec("csptc")),
+    "moex": ("考選部", ("考選部", "考試院"), *_exec("moex")),
+    "exam": ("考試院", ("考試院",), *_exec("exam")),
+    "moe": ("教育部", ("教育部",), *_lawsys("moe")),
+    "moa": ("農業部", ("農業部", "農委會", "行政院農業委員會"), *_lawsys("moa")),
+    "moc": ("文化部", ("文化部",), *_lawsys("moc")),
+    "nstc": ("國家科學及技術委員會", ("國科會", "國家科學及技術委員會", "科技部"), *_lawsys("nstc")),
+    "cip": ("原住民族委員會", ("原民會", "原住民族委員會"), *_lawsys("cip")),
+    "oac": ("海洋委員會", ("海委會", "海洋委員會"), *_lawsys("oac")),
+    "ftc": ("公平交易委員會", ("公平會", "公平交易委員會"), *_lawsys("ftc")),
+    "motc": ("交通部", ("交通部",), _motc_search, _motc_get),
+    "cbc": ("中央銀行", ("中央銀行", "央行"), _cbc_search, _cbc_get),
     "tipo": ("經濟部智慧財產局", ("經濟部", "智慧財產局", "智慧局", "著作權"), _tipo_search, _tipo_get),
+    "tipo_guide": ("經濟部智慧財產局審查基準", ("經濟部", "智慧財產局", "智慧局", "專利", "商標", "審查基準"),
+                   ip_guidelines.search, ip_guidelines.get),
+    "taipei": ("臺北市政府", ("臺北市", "台北市", "臺北市政府", "台北市政府", "北市"), _taipei_search, _taipei_get),
     "fint": ("司法院法學資料檢索系統", ("司法院",), _fint_search, _fint_get),
     "gazette": ("行政院公報", ("行政院公報", "公報"), _gazette_search, _gazette_get),
 }
