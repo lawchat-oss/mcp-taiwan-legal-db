@@ -82,13 +82,13 @@ All data in this project is sourced from public databases run by Taiwan governme
 
 ## 6. 訴願決定與準司法決定 / Administrative Appeals and Quasi-judicial Decisions
 
-只收錄官網已遮蔽當事人姓名的來源。行政院 108 年以前收辦、法務部約 112 年以前標題未遮蔽姓名的決定書不列出；經濟部、農業部、原民會、教育部的訴願網站未遮蔽姓名，未收錄。需要驗證碼或 Cloudflare 驗證的網站（勞動部、財政部、內政部、衛福部、臺南市的訴願查詢，醫事懲戒、NCC）未收錄，也不嘗試繞過。
+官網公開的決定書照原樣提供：多數機關已遮蔽當事人姓名，部分舊案（行政院 108 年以前收辦、法務部約 112 年以前）與原民會的決定書官網未遮蔽，本工具不另外遮蔽。經濟部、農業部、教育部的訴願網站尚未收錄。需要驗證碼或 Cloudflare 驗證的網站（勞動部、財政部、內政部、衛福部、臺南市的訴願查詢，醫事懲戒、NCC）未收錄，也不嘗試繞過。
 
 ### 預設來源與準司法機關
 
 | 機關 / Agency | URL | Coverage |
 |---|---|---|
-| 行政院訴願審議委員會 | https://appeal.ey.gov.tw | 近 10 年訴願決定書（PDF）。robots.txt 不允許爬蟲；僅使用者觸發的單次查詢。108 年以前收辦案件官網未遮蔽姓名，本工具不列出 |
+| 行政院訴願審議委員會 | https://appeal.ey.gov.tw | 訴願決定書（PDF；108 年以前收辦案件為 HTML）。robots.txt 不允許爬蟲；僅使用者觸發的單次查詢 |
 | 公平交易委員會 | https://www.ftc.gov.tw/internet/main/decision/decisionList.aspx?mid=11 | 處分書及不處分決議書（PDF） |
 | 勞動部不當勞動行為裁決委員會 | https://uflb.mol.gov.tw/front/querydecision | 不當勞動行為裁決 |
 | 公務人員保障暨培訓委員會 | https://web13.csptc.gov.tw/index.aspx | 復審、再申訴決定（不含年金改革案件） |
@@ -113,6 +113,7 @@ All data in this project is sourced from public databases run by Taiwan governme
 | 國軍退除役官兵輔導委員會 | https://www.vac.gov.tw/sp-appeal-CDQS-1.html |
 | 國家科學及技術委員會 | https://www.nstc.gov.tw/law/ch/list/120f2d63-fdac-4d36-a6e6-19bac8bc430d |
 | 數位發展部 | https://moda.gov.tw/information-service/govinfo/administrative-appeal/1235 |
+| 原住民族委員會 | https://law.cip.gov.tw/ （主管法規共用系統「函釋及訴願決定」類） |
 | 行政院公共工程委員會 | https://www.pcc.gov.tw/content/index?eid=10166&type=C |
 
 ### 縣市政府訴願決定（須指定才查）

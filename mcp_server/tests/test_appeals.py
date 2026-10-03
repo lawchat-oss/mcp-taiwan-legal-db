@@ -248,7 +248,7 @@ async def test_rhythm_get_bundle_caps_files(monkeypatch):
     assert d["summary"] == "115年第4次訴願審議委員會決定書" and d["pdf_url"].startswith("https://ws/Download.ashx")
 
 
-async def test_moj_hides_unmasked_titles():
+async def test_moj_lists_old_unmasked_titles_too():
     def handler(request):
         return _html("""<p>共 2 筆資料，第 1/1 頁</p><table>
           <tr><td data-title="序號">01</td><td data-title="標題"><a href="/media/1/a.pdf?mediaDL=true">
@@ -259,12 +259,11 @@ async def test_moj_hides_unmasked_titles():
 
     async with _client(handler) as http:
         g = await _search("moj")(http, "資訊", 0, 0, "", 1)
-        with pytest.raises(LookupError):
-            await _get("moj")(http, "10813504470")
-    assert g["items"] == [{"id": "moj:11513521450", "agency": "法務部", "category": "訴願決定",
-                           "doc_number": "法訴字第11513521450號", "date": "2026-08-24",
-                           "summary": "趙○○因申請提供資訊事件"}]
-    assert "1 件" in g["note"] and g["total"] == 2
+    assert g["items"][0] == {"id": "moj:11513521450", "agency": "法務部", "category": "訴願決定",
+                             "doc_number": "法訴字第11513521450號", "date": "2026-08-24",
+                             "summary": "趙○○因申請提供資訊事件"}
+    # 約 112 年以前的標題未遮蔽姓名：官網公開就照原樣列出
+    assert g["items"][1]["id"] == "moj:10813504470" and g["total"] == 2
 
 
 async def test_vac_pages_locally_and_needs_a_criterion():
@@ -313,3 +312,14 @@ def test_motc_rows_keep_postback_target():
       </td></tr></table>""", "html.parser")
     assert ap._motc_rows(soup) == [(ap._item("1150014941", "", "", "違反汽車運輸業管理事件"),
                                     "ctl00$ctl00$MainContent$MainContent$dgG$ctl03$dwG_m13_header")]
+
+
+async def test_glrs_doc_number_keeps_year_and_splits_cause_dash():
+    from mcp_server.tools import appeals as ap
+    page = """<table class="tab-list">
+      <tr><td>1</td><td>115.07.01</td><td><a href="LawContent.aspx?id=GL000001">115年度府訴決字第008號</a></td></tr>
+      <tr><td>2</td><td>115.06.26</td><td><a href="LawContent.aspx?id=GL000485">
+        某甲不服南投縣政府撤銷原住民保留地所有權移轉登記之行政處分-原民訴字第1150031378號。</a></td></tr></table>"""
+    async with _client(lambda r: httpx.Response(200, text=page)) as http:
+        g = await ap._glrs_search("https://x.gov.tw/", {}, http, "", 0, 0, "", 1)
+    assert [i["doc_number"] for i in g["items"]] == ["115年度府訴決字第008號", "原民訴字第1150031378號"]

@@ -63,14 +63,16 @@ def test_ey_layout_strips_page_headers_and_breaks_sections():
     assert ad._ey_layout(raw) == "行政院訴願決定書本院決定如下：\n主文\n訴願駁回。\n事實\n一、甲乙。\n二、丙。"
 
 
-async def test_ey_search_routes_number_and_hides_unmasked_old_cases():
+async def test_ey_search_routes_number_and_ids_old_cases_by_decision_number():
     sent = []
 
     def handler(request):
         sent.append(dict(parse_qsl(request.content.decode(), keep_blank_values=True)))
         return httpx.Response(200, json={"Total": 2, "Data": [
             {"DCS_ID": "A-115-000633", "DCS_DATE": "115/08/21", "DCS_MASKEDSHORTREASON": "張○○因護照事件"},
-            {"DCS_ID": "40743", "DCS_DATE": "108/09/05", "DCS_MASKEDSHORTREASON": "王某某因申請應用檔案事件"},
+            {"DCS_ID": "40743", "DCS_DATE": "108/09/05", "DCS_MASKEDSHORTREASON": "王某某因申請應用檔案事件",
+             "DCS_FULLTEXT": "院臺訴字第1080175020號<br/><p>行政院訴願決定書</p><p>主　　文</p><p>訴願駁回。</p>"},
+            {"DCS_ID": "40000", "DCS_DATE": "108/09/01", "DCS_FULLTEXT": "<p>沒有字號的舊案</p>"},
         ]})
 
     async with _client(handler) as http:
@@ -78,8 +80,13 @@ async def test_ey_search_routes_number_and_hides_unmasked_old_cases():
         await ad._ey_search(http, "", 0, 0, "院臺訴字第1155016714號", 1)
     assert sent[0]["CaseNo"] == "A-115-000633" and sent[0]["No"] == ""
     assert sent[1]["No"] == "1155016714" and sent[1]["CaseNo"] == ""
-    assert [i["id"] for i in group["items"]] == ["ey:A-115-000633"]
-    assert group["items"][0]["date"] == "2026-08-21" and "1 件" in group["note"]
+    # 108 年以前的舊案沒有案號：以院臺訴字號碼為 id；連字號都沒有的取不回全文，不列
+    assert [i["id"] for i in group["items"]] == ["ey:A-115-000633", "ey:1080175020"]
+    assert group["items"][0]["date"] == "2026-08-21" and group["items"][1]["doc_number"] == "院臺訴字第1080175020號"
+    async with _client(handler) as http:
+        old = await ad._ey_get(http, "1080175020")
+    assert sent[-1]["No"] == "1080175020" and old["full_text"].startswith("院臺訴字第1080175020號")
+    assert "訴願駁回。" in old["full_text"] and old["date"] == "2019-09-05"
 
 
 async def test_ftc_search_postback_and_rows(monkeypatch):

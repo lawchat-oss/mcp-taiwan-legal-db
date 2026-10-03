@@ -3,7 +3,7 @@
 每個來源一組 search / get，格式同 admin_decisions.SOURCES；查詢時即時向官方網站取得，每次查詢最多數個請求，不批次抓取。
 決定 id 一律為「來源代碼:原站識別碼」，例如 taichung:1140935、hualien:GL001665。
 
-- 只收錄官網已遮蔽訴願人姓名的來源。法務部約 112 年以前的決定書標題未遮蔽姓名，搜尋時不列出（同行政院 108 年以前）。
+- 官網公開的就照原樣列出：法務部約 112 年以前、原民會的決定書標題含訴願人姓名（同行政院 108 年以前）。
 - 臺北市的 robots.txt 不允許爬取決定書全文路徑：只做使用者觸發的單次查詢。
 - 許多網站只能比對標題、或只給頁數不給筆數，差異寫在各來源回傳的 note。
 """
@@ -557,7 +557,6 @@ async def _cbc_get(http, doid: str) -> dict:
 # ─────────────────────────────────────────────────────────────
 
 MOJ_LIST = "https://www.moj.gov.tw/2204/2645/2686/Lpsimplelist"
-_MASKED = re.compile("[○〇OＯ某＊*]")
 
 
 async def _moj_rows(http, query: str, page: int) -> tuple[int, list[tuple[dict, str, bool]]]:
@@ -577,23 +576,20 @@ async def _moj_rows(http, query: str, page: int) -> tuple[int, list[tuple[dict, 
         summary = re.sub(r"[（(]\d{7}[)）]\s*$", "", rest).strip("-_ ")
         date = _iso("/".join(when.groups())) if when else _iso(_text(tr.select_one("td[data-title*=日期]")))
         item = _item(head.group(2), re.sub(r"\s+", "", head.group(1)), date, summary)
-        rows.append((item, urljoin(MOJ_LIST, a["href"]), bool(_MASKED.search(summary[:8]))))
+        rows.append((item, urljoin(MOJ_LIST, a["href"])))
     return int(m.group(1)) if m else 0, rows
 
 
 async def _moj_search(http, keyword: str, year_from: int, year_to: int, doc_number: str, page: int) -> dict:
     no = _number(doc_number)
     total, rows = await _moj_rows(http, no or keyword, page)
-    kept = [i for i, _, masked in rows if masked]
     notes = [_TITLE_ONLY, _NO_YEAR if year_from or year_to else "", "已改以字號查詢，關鍵字未套用" if no and keyword else ""]
-    if len(kept) < len(rows):
-        notes.append(f"本頁另有 {len(rows) - len(kept)} 件約 112 年以前的決定書未列出（官網標題未遮蔽訴願人姓名）")
-    return _page(total, kept, page * 20 < total, *notes)
+    return _page(total, [i for i, _ in rows], page * 20 < total, *notes)  # 約 112 年以前的標題未遮蔽姓名（官網原樣）
 
 
 async def _moj_get(http, number: str) -> dict:
     _, rows = await _moj_rows(http, number, 1)
-    hit = next(((i, url) for i, url, masked in rows if i["id"] == number and masked), None)
+    hit = next(((i, url) for i, url in rows if i["id"] == number), None)
     if hit is None:
         raise LookupError(number)
     item, pdf_url = hit
@@ -862,7 +858,9 @@ async def _glrs_search(base: str, filters: dict, http, keyword: str, year_from: 
         if m and len(td) >= 3:
             title = re.sub(r"\s+", "", a.get_text())  # 花蓮縣政府訴願決定書(115年訴字第16號)／115年度府訴決字第008號；關鍵字包在 span 裡
             no = re.search(r"[（(]\s*(.+?)\s*[)）]", title)
-            items.append(_item(m.group(1), no.group(1) if no else title, _iso(_text(td[1])), title))
+            tail = title.rpartition("-")[2].rstrip("。")  # 原民會：「案由-原民訴字第…號」
+            doc = no.group(1) if no else (tail if "-" in title and "字第" in tail else title)
+            items.append(_item(m.group(1), doc, _iso(_text(td[1])), title))
     m = re.search(r"共\s*(\d+)\s*筆", _text(soup.select_one("li.pageinfo")))
     total = int(m.group(1)) if m else len(items)
     return _page(total, items, page * 20 < total)
@@ -1095,4 +1093,7 @@ SOURCES = dict([
               _moda_search, _moda_get),
     _register("pcc", "工程會訴願決定", "行政院公共工程委員會", ("工程會", "公共工程委員會", "行政院公共工程委員會"),
               r"\d{6,20}", _pcc_search, _pcc_get),
+    # 部會主管法規共用系統的「函釋及訴願決定」類（幾乎都是訴願決定；標題含訴願人姓名，官網原樣）
+    _register("cip", "原民會訴願決定", "原住民族委員會", ("原民會", "原住民族委員會"), r"GL\d{6}",
+              *_glrs("https://law.cip.gov.tw/", NLawTypeID="all", GroupID="5")),
 ])

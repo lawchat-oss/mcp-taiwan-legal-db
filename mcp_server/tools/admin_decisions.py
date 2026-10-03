@@ -2,7 +2,8 @@
 appeals 的各部會與地方政府訴願決定
 
 兩者全文都只有 PDF（行政院 108 年以前收辦的案件是 HTML）；查詢時即時向官方網站取得、擷取文字。
-決定 id 一律為「來源代碼:原站識別碼」，例如 ey:A-115-000633、ftc:73ce9ef1-….pdf。
+決定 id 一律為「來源代碼:原站識別碼」，例如 ey:A-115-000633、ftc:73ce9ef1-….pdf；行政院 108 年以前的案件沒有案號，
+以院臺訴字號碼為 id（ey:1070210137）。
 行政院訴願網站的 robots.txt 不允許爬蟲：這裡只做使用者觸發的單次查詢，不批次抓取。
 """
 
@@ -48,6 +49,9 @@ def _roc_slash(year: int, end: bool) -> str:
 # ─────────────────────────────────────────────────────────────
 
 _EY_CASE_NO = re.compile(r"^A-\d{3}-\d{6}$")
+# 108 年以前收辦的案件沒有案號、id 是流水號，全文 HTML 直接附在查詢結果；以決定書字號的號碼當 id，取全文時再以字號查回
+_EY_OLD_NO = re.compile(r"院[臺台]訴字第\s*(\d+)\s*號")
+_EY_OLD_ID = re.compile(r"^\d{6,12}$")
 # 每頁頁首「案號：A-115-000633 第 1 頁(共 6 頁)」，擷取後會黏在段落中間
 _EY_PAGE_HEADER = re.compile(r"案號：A-\d{3}-\d{6}\s*第\s*\d+\s*頁\s*[（(]共\s*\d+\s*頁[)）]\s*")
 
@@ -83,26 +87,47 @@ async def _ey_search(http, keyword: str, year_from: int, year_to: int, doc_numbe
         number="" if _EY_CASE_NO.match(number) else re.sub(r"\D", "", number),
         start=_roc_slash(year_from, False), end=_roc_slash(year_to, True), page=page,
     )
-    rows = data.get("Data") or []
-    # 108 年以前收辦的案件（id 為純數字、全文為 HTML）連列表的案由都沒有遮蔽訴願人姓名，暫不列出
-    kept = [x for x in rows if _EY_CASE_NO.match(x.get("DCS_ID", ""))]
+    items = []
+    for x in data.get("Data") or []:
+        old = None if _EY_CASE_NO.match(x.get("DCS_ID", "")) else _EY_OLD_NO.search(x.get("DCS_FULLTEXT") or "")
+        if old is None and not _EY_CASE_NO.match(x.get("DCS_ID", "")):
+            continue  # 舊案找不到字號就無法再取回全文
+        items.append({
+            "id": f"ey:{old.group(1) if old else x['DCS_ID']}", "agency": "行政院", "category": "訴願決定",
+            "doc_number": f"院臺訴字第{old.group(1)}號" if old else x["DCS_ID"],
+            "date": _roc_to_iso(x.get("DCS_DATE", "")),
+            "summary": (x.get("DCS_MASKEDSHORTREASON") or "").strip(),  # 108 年以前的案由未遮蔽姓名（官網原樣）
+        })
     total = int(data.get("Total") or 0)
-    group = {
-        "source": "行政院訴願審議委員會", "category": "訴願決定", "total": total,
-        "has_more": page * 20 < total,
-        "items": [{
-            "id": f"ey:{x['DCS_ID']}", "agency": "行政院", "category": "訴願決定",
-            "doc_number": x["DCS_ID"], "date": _roc_to_iso(x.get("DCS_DATE", "")),
-            "summary": (x.get("DCS_MASKEDSHORTREASON") or "").strip(),
-        } for x in kept],
+    return {"source": "行政院訴願審議委員會", "category": "訴願決定", "total": total,
+            "has_more": page * 20 < total, "items": items}
+
+
+async def _ey_get_old(http, number: str) -> dict:
+    data = await _ey_read(http, number=number)
+    row = next((x for x in data.get("Data") or [] if not _EY_CASE_NO.match(x.get("DCS_ID", ""))
+                and (m := _EY_OLD_NO.search(x.get("DCS_FULLTEXT") or "")) and m.group(1) == number), None)
+    if row is None:
+        raise LookupError(number)
+    soup = BeautifulSoup(row["DCS_FULLTEXT"], "html.parser")
+    for br in soup.find_all("br"):
+        br.replace_with("\n")
+    for tag in soup.find_all(["p", "tr"]):
+        tag.insert_after("\n")
+    text = re.sub(r"[ \t\xa0]+", " ", soup.get_text())
+    return {
+        "agency": "行政院", "category": "訴願決定", "doc_number": f"院臺訴字第{number}號",
+        "date": _roc_to_iso(row.get("DCS_DATE", "")),
+        "summary": (row.get("DCS_MASKEDSHORTREASON") or "").strip(),
+        "full_text": re.sub(r"\n\s*\n+", "\n", text).strip(),
+        "notes": "108 年以前收辦的案件，官網未遮蔽當事人姓名。",
+        "source_url": f"{EY_BASE}/Search/Search01",
     }
-    if len(kept) < len(rows):
-        group["note"] = (f"本頁另有 {len(rows) - len(kept)} 件 108 年以前收辦的案件未列出"
-                         "（官網未遮蔽當事人姓名）；需要時請至 appeal.ey.gov.tw 查閱。")
-    return group
 
 
 async def _ey_get(http, case_no: str) -> dict:
+    if _EY_OLD_ID.match(case_no):
+        return await _ey_get_old(http, case_no)
     if not _EY_CASE_NO.match(case_no):
         raise LookupError(case_no)
     data = await _ey_read(http, case_no=case_no)
