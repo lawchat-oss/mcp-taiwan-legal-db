@@ -539,11 +539,11 @@ class StatisticsClient:
         key, _, native_id = stat_id.partition(":")
         if key not in SOURCES or not native_id:
             return error_response(f"id 格式錯誤：「{stat_id}」，請使用搜尋結果回傳的 id")
-        cache_key = f"statistics:{stat_id}"
+        cache_key = f"statistics:v2:{stat_id}"  # v2 起不按字數截斷，舊快取不沿用
+        search_key = {"tool": "statistics_get", "v": 2, "id": stat_id}
         # 法務統計常用統計表每月滾動更新，只快取一天；其他來源是固定檔案，走長期快取
-        cached = await (self.cache.get_search({"tool": "statistics_get", "id": stat_id}) if key == "moj"
-                        else self.cache.get_judgment(cache_key))
-        if cached and not cached.get("truncated"):
+        cached = await (self.cache.get_search(search_key) if key == "moj" else self.cache.get_judgment(cache_key))
+        if cached:
             return {"success": True, "cached": True, **cached}
         label, _, _, get = SOURCES[key]
         try:
@@ -557,7 +557,7 @@ class StatisticsClient:
             if k in data:
                 data["truncated"] = data.get("truncated", False) or data[k].endswith(SHEETS_OMITTED)
         if key == "moj":
-            await self.cache.set_search({"tool": "statistics_get", "id": stat_id}, data, ttl=int(_TTL))
+            await self.cache.set_search(search_key, data, ttl=int(_TTL))
         else:
             await self.cache.set_judgment(cache_key, data, source="statistics")
         return {"success": True, "cached": False, **data}

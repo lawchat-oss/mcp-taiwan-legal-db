@@ -3,7 +3,7 @@
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, unquote
 
 import httpx
 import pytest
@@ -187,15 +187,29 @@ async def test_moenv_api_search_and_exact_get():
     assert g["has_more"] and d["date"] == "2026-09-23" and "甲" in d["full_text"]
 
 
+async def test_moenv_single_past_year_is_not_a_reversed_range():
+    sent = []
+
+    def handler(r):
+        sent.append(form(r))
+        return httpx.Response(200, json={"recordsFiltered": 0, "data": []})
+    async with client(handler) as http:
+        await ap._moenv_search(http, "廢棄物", 0, 110, "", 1)
+    assert sent[0]["DateStartString"] == ["110/01/01"] and sent[0]["DateEndString"] == ["110/12/31"]
+
+
 async def test_moc_public_spa_response_and_no_stored_token(monkeypatch):
     response = AsyncMock(side_effect=[{"total": 11, "rows": [{"id": 155174, "title": "票券", "issueDate": 0}]},
-                                     {"decideDocumentNo": "文規字第1號", "reason": "理由", "content": "駁回"}])
+                                     {"decideDocumentNo": "文規字第1號", "reason": "理由", "content": "駁回"},
+                                     {"total": 0, "rows": []}])
     monkeypatch.setattr(pb, "response_json", response)
-    g = await ap._moc_search(None, "票券", 114, 115, "", 2)
+    g = await ap._moc_search(None, "票券 發行", 114, 115, "", 2)
     d = await ap._moc_get(None, "155174")
-    url = response.call_args_list[0].args[0]
-    assert "+" not in url and "offset=10" in url
-    assert "未套用" in g["note"] and d["doc_number"] == "文規字第1號"
+    url = unquote(response.call_args_list[0].args[0])
+    assert '"search":"票券"' in url and "發行" not in url and "offset=10" in url
+    assert "未套用" in g["note"] and "只查「票券」" in g["note"] and d["doc_number"] == "文規字第1號"
+    await ap._moc_search(None, "票券", 0, 0, "文規字第1號", 1)
+    assert '"search":"文規字第1號"' in unquote(response.call_args_list[2].args[0])
 
 
 async def test_mol_public_voice_validation(monkeypatch):

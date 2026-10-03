@@ -21,7 +21,7 @@ import re
 import ssl
 from dataclasses import dataclass
 from functools import partial
-from urllib.parse import parse_qs, urlencode, urljoin, urlparse
+from urllib.parse import parse_qs, quote, urlencode, urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -1239,14 +1239,15 @@ async def _moenv_search(http, keyword, year_from, year_to, doc_number, page):
     if not 1 <= page <= 30:
         raise ValueError("環境部每次查詢最多 300 筆（30 頁），請縮小條件")
     today = datetime.now().date()
-    start = year_from or today.year - 1911
+    start = year_from or year_to or today.year - 1911  # 只給一個年度時查該年度，不會變成反向區間
+    end = year_to or year_from
     data = await _moenv_query(http, {"Keyword": keyword, "DocNo": _number(doc_number),
-        "DateStartString": f"{start}/01/01", "DateEndString": f"{year_to}/12/31" if year_to else
+        "DateStartString": f"{start}/01/01", "DateEndString": f"{end}/12/31" if end else
         f"{today.year - 1911}/{today.month:02d}/{today.day:02d}"}, page)
     rows = [_item(x["caseNo"], x.get("docNo", ""), _iso(x.get("date", "")),
                   _html_text(x.get("subject") or x.get("name", ""))) for x in data["data"]]
     return _page(data["recordsFiltered"], rows, page * 10 < min(data["recordsFiltered"], 300),
-                 "未指定起始年度時依官網預設查本年度；官網每次查詢最多 300 筆，請縮小條件")
+                 "未指定年度時查本年度、只指定一個年度時查該年度；官網每次查詢最多 300 筆，請縮小條件")
 
 
 async def _moenv_get(http, native_id):
@@ -1328,16 +1329,20 @@ def _epoch_date(value):
 
 
 async def _moc_search(http, keyword, year_from, year_to, doc_number, page):
-    query = {"search": " ".join(x for x in (keyword, doc_number) if x)}
-    # 年度與字號未證實是獨立欄位；不假裝 API 已套用。
+    # 官網整串當成一個詞組比對（「電影 電影」0 筆），所以只送一個詞：有字號查字號，否則取第一個詞
+    terms = (doc_number or keyword).split()
+    query = {"search": terms[0] if terms else ""}
+    # 年度未證實是獨立欄位；不假裝 API 已套用。
     params = {"limit": 10, "offset": (page - 1) * 10, "query": json.dumps(query, ensure_ascii=False, separators=(",", ":")),
               "sort": "issueDate", "order": "desc"}
-    data = await public_browser.response_json(_MOC_BASE + "?" + urlencode(params), _MOC_API + "?")
+    # 空白要編成 %20：前端把「+」當成字面加號，多詞查詢會失敗
+    data = await public_browser.response_json(_MOC_BASE + "?" + urlencode(params, quote_via=quote), _MOC_API + "?")
     if not isinstance(data.get("rows"), list) or "total" not in data:
         raise RuntimeError("文化部查詢回應格式不符")
     rows = [_item(str(x["id"]), "", _epoch_date(x.get("issueDate")), x.get("title", "")) for x in data["rows"]]
-    return _page(data["total"], rows, page * 10 < data["total"], "日期為刊登日期；字號併入全文關鍵字查詢",
-                 _NO_YEAR if year_from or year_to else "")
+    return _page(data["total"], rows, page * 10 < data["total"], "日期為刊登日期", _NO_YEAR if year_from or year_to else "",
+                 "本次以字號查詢，keyword 未套用" if doc_number and keyword else "",
+                 f"官網只比對單一詞組，本次只查「{terms[0]}」" if len(terms) > 1 else "")
 
 
 async def _moc_get(http, native_id):

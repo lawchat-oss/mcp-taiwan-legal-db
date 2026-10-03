@@ -27,10 +27,12 @@ def cache():
 ])
 async def test_source_clients_return_long_document_and_refresh_truncated_cache(monkeypatch, module, cls, key):
     saved = cache()
-    if module is ad:
-        # Legacy decision entries also stopped assembling attachments early; v2 bypasses those keys.
+    if module in (ad, stats):
+        # Legacy entries were cut by character limits; v2 keys bypass them.
+        prefix = "decision:v2:" if module is ad else "statistics:v2:"
+
         async def previous(cache_key):
-            assert cache_key.startswith("decision:v2:")
+            assert cache_key.startswith(prefix)
             return None
         saved.get_judgment.side_effect = previous
     label, aliases, search, _ = module.SOURCES[key]
@@ -82,3 +84,17 @@ def test_reasoning_citations_include_the_document_tail(monkeypatch):
 def test_statistics_does_not_drop_sheets_after_long_text():
     rendered = stats.sheets_to_text([("一", [[TEXT]]), ("二", [["最後一張表"]])])
     assert TEXT in rendered and "最後一張表" in rendered
+
+
+async def test_statistics_reuses_cached_sheet_limited_table(monkeypatch):
+    saved = cache()
+    saved.get_judgment = AsyncMock(return_value={"table_text": "表" + stats.SHEETS_OMITTED, "truncated": True})
+    fetch = AsyncMock()
+    label, aliases, search, _ = stats.SOURCES["judicial"]
+    monkeypatch.setitem(stats.SOURCES, "judicial", (label, aliases, search, fetch))
+    client = stats.StatisticsClient(saved)
+    try:
+        result = await client.get("judicial:test")
+    finally:
+        await client.close()
+    assert result["cached"] and fetch.await_count == 0
