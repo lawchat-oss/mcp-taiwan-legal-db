@@ -151,10 +151,11 @@ async def lifespan(server: MCPServer):
 mcp = MCPServer(
     name="台灣法律資料庫",
     instructions=(
-        "查詢司法院裁判書、全國法規資料庫、大法官解釋（釋字）與憲法法庭裁判（憲判字）、"
-        "各機關行政函釋與審查基準、最高法院決議／法律問題座談／判例／精選裁判等判解、訴願決定與準司法機關決定、"
-        "立法理由與立法紀錄、憲法法庭卷宗、官方統計與量刑資訊的 MCP 工具。"
-        "釋字/憲判字預設層與理由書從本地快取即時回傳，無需連網。"
+        "即時查詢臺灣官方法律資料：司法院裁判書、全國法規資料庫（含英譯、修法沿革、立法理由）、"
+        "大法官解釋（釋字）與憲法法庭裁判（憲判字）及卷宗、各機關行政函釋與審查基準、"
+        "最高法院決議／法律問題座談／判例／精選裁判等判解、訴願決定與準司法機關決定、"
+        "立法院議案與公報、法規命令及法律草案預告、地方自治法規、條約協定、交易所規章、"
+        "司法與法務統計、量刑統計、法學研究文獻（司法院研究報告、期刊論文、GRB、開放取用期刊）。"
     ),
     lifespan=lifespan,
 )
@@ -181,8 +182,8 @@ async def search_judgments(
     結果自動按法院權威性排序（最高法院→高等法院→地方法院），同層級按原始排序。
     每筆結果含 court（法院名稱）、case_type（民事/刑事/行政）、court_level（1=最高/2=高等/3=地方）。
 
-    【重要】查特定案號時，必須用 case_word + case_number（精確查詢），不要把案號放在 keyword。
-    例如查「114年度上易字第503號」→ case_word="上易", case_number="503", year_from=114。
+    查特定案號用 case_word + case_number（精確比對），例如「114年度上易字第503號」→ case_word="上易",
+    case_number="503", year_from=114；案號放在 keyword 會變成全文檢索，命中的是提到該案號的其他裁判。
     keyword 用於主題式全文檢索（如「預售屋 遲延交屋」）。
     要找「哪些判決引用了某裁判或釋字」時才把完整字號放進 keyword（如「108年度台上大字第2680號」「釋字第748號」），
     結果就是全文提到該字號的裁判。
@@ -191,17 +192,8 @@ async def search_judgments(
     僅零星收錄，80 年（1991）以前查無。查詢早於 89 年的裁判若無結果，應告知使用者是資料源
     不涵蓋，而非該判決不存在。
 
-    【進階實務研究欄位】:
-    - main_text: 裁判主文關鍵字 — 最有效的輸贏方篩選方式。
-      主文措辭高度制度化（依民刑訴訟法條生成），substring match 接近
-      解析半結構化欄位，精度高：
-        * 「被告應將 移轉」→ 被告敗訴（物權移轉類）
-        * 「被告應給付」→ 被告敗訴（金錢給付類）
-        * 「原告之訴駁回」→ 原告敗訴
-        * 「上訴駁回」→ 維持原審
-    可與 keyword 併用，例：
-        找「借名登記成立、被告敗訴」→
-        main_text="被告應將 移轉", keyword="借名登記", case_type="民事"
+    main_text 比對裁判主文，主文用語固定，可用來篩勝敗結果並與 keyword 併用：
+    「被告應將 移轉」「被告應給付」→ 被告敗訴；「原告之訴駁回」→ 原告敗訴；「上訴駁回」→ 維持原審。
 
     Args:
         keyword: 全文檢索關鍵字（對應 jud_kw）
@@ -515,13 +507,13 @@ def get_interpretation(
 
     Args:
         case_id: 解釋/裁判字號字串
-        include_reasoning: 回傳理由書全文（不按字數截斷）
+        include_reasoning: 回傳理由書全文
         reasoning_keyword: 在理由書中搜尋關鍵字並回片段（覆蓋 include_reasoning）
         include_opinions: 回傳意見書全文
         opinions_keyword: 在意見書中搜尋關鍵字並回片段
         opinion_document: 只取標題含此字串的意見書全文（例如大法官姓名「許宗力」）；
             回傳的 opinion_documents 列出每份的標題、官網 PDF 連結與字數
-        opinions_offset: 意見書全文從第幾字開始回傳；預設 0，完整回傳該位置以後的全部文字
+        opinions_offset: 意見書全文從第幾字開始回傳（預設 0）
     """
     return _cc_get_interpretation(
         case_id, include_reasoning, reasoning_keyword,
@@ -545,7 +537,8 @@ def search_interpretations(
 ) -> dict:
     """列舉大法官解釋 / 憲法法庭裁判。支援關鍵字全文搜尋（搜爭點 + 理由書）。
 
-    每筆結果帶 case_id，可直接傳給 get_interpretation()。
+    每筆結果帶 case_id，可直接傳給 get_interpretation()。行政機關的函釋、解釋令不在這裡，
+    用 search_agency_interpretations。
 
     Args:
         keyword: 關鍵字（標題/字號/爭點/理由書全文匹配）
@@ -600,6 +593,7 @@ async def search_agency_interpretations(
     page: int = 1,
 ) -> dict:
     """搜尋各機關的行政函釋（解釋令、函釋、法規諮詢意見）與審查基準，即時查詢各機關官方系統。
+    大法官解釋（釋字）與憲判字不在這裡，用 search_interpretations。
 
     來源：法務部（行政函釋、法規諮詢意見）、勞動部（行政函釋、解釋令）、衛生福利部、
     財政部（各稅法令彙編、新頒令釋；主管法規系統另含關務署、國有財產署、國庫署的核釋令）、
@@ -632,7 +626,7 @@ async def search_agency_interpretations(
             智慧局審查基準只比對章名（如「專利要件」「混淆誤認」）
         agency: 機關名稱，可用逗號分隔多個，例如「勞動部」「財政部,經濟部」「銓敘部」「地政司」「臺北市」「智慧局」。
             NCC、客委會、僑委會、運動部、關務署新頒釋函與陸委會主站廣告函釋須指名才查。
-            NCC 可查個別函復；陸委會主站限廣告規範。數位發展部仍只補查公報中依法公告的解釋性規定
+            NCC 可查個別函復；陸委會主站限廣告規範。數位發展部只收行政院公報中依法公告的解釋性規定
         year_from: 起始年度（民國年，如 110）
         year_to: 截止年度（民國年，如 114）
         doc_number: 發文字號或其號碼（如「法律字第11403512580號」或「11403512580」）
@@ -758,7 +752,7 @@ async def search_administrative_decisions(
     - 各部會與地方政府訴願決定：機關名稱如「臺北市」「新北市」「臺中市」「高雄市」「國防部」「交通部」「法務部」
       「金管會」「退輔會」「原民會」「經濟部」「農業部」「教育部」「文化部」「環境部」「勞動部」
       「內政部」「衛福部」「中選會」「人事總處」「基隆市」等，或「訴願」查全部（含行政院）。部分網站只能比對標題、只給頁數，差異見各來源的 note。
-      內政部／衛福部需 [captcha] OCR 依賴，最多嘗試兩次；文化部需 Chromium。農業部／教育部最多五頁。
+      農業部／教育部最多五頁。
       「醫事懲戒」查目前公告（預設西醫師，可用牙醫師等前綴）；只比對姓名、縣市、證書字號，掃描檔只附 PDF。
       官網公開的內容照原樣提供：部分機關的舊案
       （行政院 108 年以前、法務部約 112 年以前、原民會）未遮蔽訴願人姓名
@@ -926,7 +920,7 @@ async def search_legislative_records(
 async def get_legislative_record(record_id: str) -> dict:
     """取得立法紀錄全文：議案（bill:…，含提案人、審議進度與關係文書內容）、立法院公報（gazette:…）、
     法規命令草案預告（draft:…，含陳述意見截止日期與草案總說明、條文對照表），
-    或 get_legislative_history 立法歷程列出的公報頁（lispdf:…）。全文不按字數截斷。
+    或 get_legislative_history 立法歷程列出的公報頁（lispdf:…）。
 
     Args:
         record_id: search_legislative_records 或 get_legislative_history 回傳的 id
@@ -1056,7 +1050,7 @@ async def search_legal_literature(
 
 @mcp.tool()
 async def get_legal_literature(literature_id: str) -> dict:
-    """取得研究文獻的書目、摘要與全文（有公開全文時；不按字數截斷）。
+    """取得研究文獻的書目、摘要與全文（有公開全文時）。
 
     國家圖書館授權的全文只供個人查閱，請勿轉存或散布。
 
@@ -1077,7 +1071,7 @@ async def search_other_regulations(keyword: str, source: str = "", page: int = 1
 
     - 地方自治法規（自治條例、自治規則、委辦規則）：臺北市、新北市、桃園市、臺中市、臺南市、高雄市、基隆市、
       新竹縣市、苗栗縣、彰化縣、南投縣、嘉義縣市、屏東縣、宜蘭縣、花蓮縣、臺東縣、澎湖縣、金門縣、連江縣、雲林縣
-      （只收現行法規；雲林驗證時使用瀏覽器）
+      （只收現行法規）
     - 條約及協定：全國法規資料庫的條約（只比對名稱）、外交部條約協定資料庫（可加國家，如「日本 所得稅」；
       部分舊約是掃描檔只有 PDF 連結）、財政部租稅協定（避免雙重課稅協定，名稱多寫「所得稅」）
     - 交易所規章：臺灣證券交易所、證券櫃檯買賣中心、臺灣期貨交易所（櫃買、期交所規章取自證基會法規系統，
