@@ -14,6 +14,8 @@ from contextlib import asynccontextmanager
 import httpx
 from bs4 import BeautifulSoup
 
+from mcp_server.tools.waf_bypass import _install_chromium, _is_missing_browser_error
+
 TIMEOUT_MS = 30000
 _lock = asyncio.Lock()
 _last_finished = 0.0
@@ -27,6 +29,16 @@ def _ready(body: str, selector: str) -> bool:
     return soup.select_one("input[type=password]") is None and soup.select_one(selector) is not None
 
 
+async def _launch(p, error_type):
+    """Chromium 未安裝時（uvx 首次執行最常見）自動安裝一次再啟動，與司法院 WAF fallback 相同。"""
+    try:
+        return await p.chromium.launch(headless=True)
+    except error_type as exc:
+        if not _is_missing_browser_error(exc) or not await asyncio.to_thread(_install_chromium):
+            raise
+        return await p.chromium.launch(headless=True)
+
+
 @asynccontextmanager
 async def session(url: str, selector: str):
     """Fresh public browser page, serialized and closed even on timeout/cancellation."""
@@ -37,7 +49,7 @@ async def session(url: str, selector: str):
         await asyncio.sleep(max(0, 1 - (time.monotonic() - _last_finished)))
         try:
             async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
+                browser = await _launch(p, BrowserError)
                 try:
                     ua = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                           f"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{browser.version} Safari/537.36")

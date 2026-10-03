@@ -452,3 +452,24 @@ async def test_browser_captures_public_api_or_reports_bad_response(monkeypatch, 
     else:
         with pytest.raises(RuntimeError):
             await pb.response_json("https://appeal.moc.gov.tw/", "https://themedata.culture.tw/api/")
+
+
+async def test_browser_sources_install_missing_chromium_once(monkeypatch):
+    from types import SimpleNamespace
+
+    from mcp_server.tools import public_browser
+
+    class Missing(Exception):
+        pass
+
+    calls = []
+
+    async def launch(headless):
+        calls.append(headless)
+        if len(calls) == 1:
+            raise Missing("Executable doesn't exist at /x; please run playwright install")
+        return "browser"
+
+    monkeypatch.setattr(public_browser, "_install_chromium", lambda: True)
+    p = SimpleNamespace(chromium=SimpleNamespace(launch=launch))
+    assert await public_browser._launch(p, Missing) == "browser" and len(calls) == 2

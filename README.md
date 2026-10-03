@@ -58,15 +58,15 @@ claude mcp add taiwan-legal-db mcp-taiwan-legal-db --scope user
 
 接著 `/mcp` 重啟連線、Claude 就會在自然語言查詢時自動用 26 個 MCP tool。
 
-**Chromium**：文化部訴願需要瀏覽器；運動部、雲林縣、陸委會主站遇到驗證時也會使用。請預先安裝。司法院既有 WAF fallback 仍支援首次使用時自動安裝：
+**Chromium**：司法院 WAF fallback，以及文化部訴願、NCC、雲林縣等需要瀏覽器的來源，會在第一次需要時自動下載安裝（約 150MB，僅一次）。無法連外下載的環境請預先安裝：
 
 ```bash
-uvx --from mcp-taiwan-legal-db playwright install chromium    # 僅在查詢需要瀏覽器時啟動
+uvx --from mcp-taiwan-legal-db playwright install chromium    # 僅在查詢需要瀏覽器時啟動，平時 idle
 ```
 
----
+**驗證碼辨識**：內政部與衛福部訴願的圖形驗證碼需要本機 OCR 依賴，安裝時加上 `[captcha]`：`pip install "mcp-taiwan-legal-db[captcha]"`（uvx：`uvx --from "mcp-taiwan-legal-db[captcha]" mcp-taiwan-legal-db`；Claude Code plugin 已內含）。未安裝時這兩個來源會回報需要安裝，其餘來源不受影響。
 
-內政部與衛福部訴願的圖形驗證碼另需本機 OCR 依賴：以 `uvx --from "mcp-taiwan-legal-db[captcha]" mcp-taiwan-legal-db` 啟動；開發環境可執行 `.venv/bin/pip install -e ".[captcha]"`。未安裝時會明確提示，每次查詢使用新的公開工作階段，辨識最多嘗試兩次。
+---
 
 ## 開發環境設置
 

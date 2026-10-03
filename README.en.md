@@ -62,15 +62,15 @@ claude mcp add taiwan-legal-db mcp-taiwan-legal-db --scope user
 
 Then `/mcp` to reload, and Claude will pick up the 26 MCP tools on natural-language queries.
 
-**Chromium**: required for Ministry of Culture appeals and for challenge fallbacks on Sports, Yunlin and MAC pages. Install it in advance. The existing Judicial Yuan WAF fallback still supports automatic installation on first use:
+**Chromium**: the Judicial Yuan WAF fallback and the sources that need a browser (Ministry of Culture appeals, NCC, Yunlin County and others) download and install it automatically on first use (about 150 MB, once). In environments without outbound downloads, install it in advance:
 
 ```bash
-uvx --from mcp-taiwan-legal-db playwright install chromium    # only used when the Judicial Yuan WAF triggers; idle otherwise
+uvx --from mcp-taiwan-legal-db playwright install chromium    # launched only when a query needs a browser; idle otherwise
 ```
 
----
+**Captcha recognition**: Interior and Health and Welfare appeals need a local OCR dependency for their image captchas; install with the `[captcha]` extra: `pip install "mcp-taiwan-legal-db[captcha]"` (uvx: `uvx --from "mcp-taiwan-legal-db[captcha]" mcp-taiwan-legal-db`; the Claude Code plugin includes it). Without it, those two sources report that it is missing; other sources are unaffected.
 
-Interior and Health and Welfare appeals also require local OCR: run `uvx --from "mcp-taiwan-legal-db[captcha]" mcp-taiwan-legal-db`, or install `.venv/bin/pip install -e ".[captcha]"` for development. Missing OCR dependencies produce an explicit error; recognition is limited to two attempts in fresh public sessions.
+---
 
 ## Development setup
 
