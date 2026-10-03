@@ -1,7 +1,7 @@
 [project]
 name = "mcp-taiwan-legal-db"
-version = "1.4.0"
-description = "MCP server for Taiwan (ROC) judicial judgments, national regulations, Constitutional Court rulings, administrative interpretations, court resolutions, appeal decisions and legislative reasons"
+version = "1.5.0"
+description = "MCP server for Taiwan (ROC) judgments, regulations, Constitutional Court rulings and case files, administrative interpretations, court resolutions, appeal and quasi-judicial decisions, legislative records, legal statistics and scholarship"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
