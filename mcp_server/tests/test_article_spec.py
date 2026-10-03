@@ -11,10 +11,11 @@ ARTICLES = [{"number": n, "content": f"第{n}條內容"} for n in
 
 
 def test_parse_spec_accepts_mixed_forms():
-    assert reg.parse_article_spec("184") == [((184, 0), (184, 0))]
+    assert reg.parse_article_spec("184") == [((184,), (184,))]
     assert reg.parse_article_spec("第184條~第198條, 247之1、15-1") == [
-        ((184, 0), (198, 0)), ((247, 1), (247, 1)), ((15, 1), (15, 1))]
-    assert reg.parse_article_spec("198~184") == [((184, 0), (198, 0))]
+        ((184,), (198,)), ((247, 1), (247, 1)), ((15, 1), (15, 1))]
+    assert reg.parse_article_spec("198~184") == [((184,), (198,))]
+    assert reg.article_label(reg.parse_article_spec("2-1-1")[0][0]) == "2-1-1"
     for bad in ("", "abc", "184~x"):
         with pytest.raises(ValueError):
             reg.parse_article_spec(bad)

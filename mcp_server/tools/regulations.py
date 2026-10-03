@@ -213,9 +213,9 @@ def _history_changes(history: str) -> dict[str, set[str] | None]:
     return _parse_history(history)[0]
 
 
-def _article_key(no: str) -> tuple[int, int]:
-    base, _, sub = _normalize_article_no(no).partition("-")
-    return int(base), int(sub or 0)
+def _article_key(no: str) -> tuple[int, ...]:
+    """「247-1」→ (247, 1)、「2-1-1」→ (2, 1, 1)；元組比較讓 15-10 排在 15 與 16 之間。"""
+    return tuple(int(p) for p in _normalize_article_no(no).split("-"))
 
 
 MAX_ARTICLES = 50  # 一次最多回傳的條數：整部法規不該一次塞給 agent
@@ -225,7 +225,7 @@ _SPEC_SEP = re.compile(r"[,，、;；]")
 _SPEC_RANGE = re.compile(r"(.+?)[~～至到](.+)")
 
 
-def parse_article_spec(spec: str) -> list[tuple[tuple[int, int], tuple[int, int]]]:
+def parse_article_spec(spec: str) -> list[tuple[tuple[int, ...], tuple[int, ...]]]:
     """「184」「184~198」「184,185,247-1」（可混用，可帶「第」「條」）→ [(起, 迄), …]；格式不對丟 ValueError。"""
     ranges = []
     for part in _SPEC_SEP.split(spec):
@@ -240,8 +240,8 @@ def parse_article_spec(spec: str) -> list[tuple[tuple[int, int], tuple[int, int]
     return ranges
 
 
-def article_label(key: tuple[int, int]) -> str:
-    return f"{key[0]}-{key[1]}" if key[1] else str(key[0])
+def article_label(key: tuple[int, ...]) -> str:
+    return "-".join(map(str, key))
 
 
 def _pick(articles: list[dict], ranges) -> tuple[list[dict], dict]:

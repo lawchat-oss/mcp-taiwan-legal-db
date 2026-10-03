@@ -29,7 +29,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from mcp_server.cache.db import CacheDB
-from mcp_server.tools import public_browser, fint, tls
+from mcp_server.tools import public_browser, fint, regulations, tls
 from mcp_server.tools._errors import error_response
 from mcp_server.tools.agency_interpretations import _date, _text
 from mcp_server.tools.pdf_text import pdf_to_text
@@ -649,18 +649,45 @@ def resolve_sources(source: str) -> list[str] | None:
     return list(dict.fromkeys(keys))
 
 
+def _spec(article_no: str):
+    """條號寫法同 query_regulation（單條、區間、多條）；中文數字條號先轉成阿拉伯數字。條號看不懂丟 ValueError。"""
+    return regulations.parse_article_spec(re.sub(r"[^,，、;；~～至到]+", lambda m: _article_no(m.group()), article_no))
+
+
 def _shape(data: dict, article_no: str) -> dict:
-    """依 article_no 篩條文；未指定時完整回傳，不按字數截斷。"""
+    """分條的規範：依 article_no 選條文（一次最多 50 條），沒指定時只回條號範圍；未分條的要點、條約回傳全文。"""
     data = dict(data)
-    if article_no:
-        target = _article_no(article_no)
-        articles = data.get("articles") or _split_articles((data.get("full_text") or "").splitlines())
-        hit = [a for a in articles if a["number"] == target]
-        if not hit:
-            raise LookupError(f"查無第 {article_no} 條" + ("" if articles else "（此文件未分條，請改看 full_text）"))
-        data.pop("full_text", None)
-        data["articles"] = hit
-    data["truncated"] = False
+    articles = data.get("articles") or _split_articles((data.get("full_text") or "").splitlines())
+    if not article_no:
+        if len(articles) > 1:
+            if not data.get("articles"):  # 條約的前言、締約背景在第一條之前，切條時不會收進任何一條
+                head = []
+                for line in (data.get("full_text") or "").splitlines():
+                    if _ART_HEAD.match(line.strip()):
+                        break
+                    head.append(line)
+                if "".join(head).strip():
+                    data["preamble"] = "\n".join(head).strip()
+            data.pop("articles", None)
+            data.pop("full_text", None)
+            if any(not re.fullmatch(r"\d+(-\d+)*", a["number"]) for a in articles):  # 「壹」「貳」這類標籤要照列才指定得到
+                data["article_numbers"] = [a["number"] for a in articles]
+            data.update(article_count=len(articles), first_article=articles[0]["number"],
+                        last_article=articles[-1]["number"], note=" ".join(filter(None, [data.get("note"),
+                        "未指定條號，只回傳條號範圍；用 article_no 指定要讀的條文。" + regulations.SPEC_HELP])))
+        return data
+    if not articles:
+        raise LookupError("此文件未分條，請不帶 article_no 讀 full_text")
+    # ponytail: 非數字標籤（壹、貳）只支援一次指定一個，原樣比對
+    exact = [a for a in articles if a["number"] == _article_no(article_no)]
+    hits, extra = (exact, {}) if exact else regulations._pick(articles, _spec(article_no))
+    if not hits:
+        raise LookupError(f"查無第 {article_no} 條")
+    data.pop("full_text", None)
+    data["articles"] = hits
+    if extra.get("note"):
+        extra["note"] = " ".join(filter(None, [data.get("note"), extra["note"]]))
+    data.update(extra)
     return data
 
 
@@ -727,3 +754,5 @@ class OtherRegulationClient:
             return {"success": True, "cached": cached, **_shape(data, article_no)}
         except LookupError as e:
             return error_response(f"{data['title']}{e.args[0]}", id=reg_id)
+        except ValueError:
+            return error_response(f"看不懂條號「{article_no}」。{regulations.SPEC_HELP}", id=reg_id)

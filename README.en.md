@@ -175,7 +175,7 @@ If that prints without errors, you're done. The repo ships a `.mcp.json` at the 
 | Tool | Purpose | Typical call |
 |---|---|---|
 | `search_other_regulations` | Search texts outside the national regulation database: local government regulations, treaties and agreements, exchange rules | `search_other_regulations("違章建築", source="臺北市")` |
-| `get_other_regulation` | Full text or a single article | `get_other_regulation("taichung:GL001385", article_no="3")` |
+| `get_other_regulation` | Articles (single, range, list; unstructured documents in full) | `get_other_regulation("taichung:GL001385", article_no="3")` |
 
 ### Tool details
 
@@ -627,7 +627,7 @@ search_other_regulations("營業細則", source="證交所")
 get_other_regulation("taichung:GL001385", article_no="3")   # Taichung City Funeral Management Autonomy Ordinance, art. 3
 ```
 
-Without `source` all 28 sources are queried, so name one. Most sources treat the keyword as a single term; give one term at a time. Article-structured texts return `articles`; unstructured ones (guidelines, treaties) return `full_text`.
+Without `source` all 28 sources are queried, so name one. Most sources treat the keyword as a single term; give one term at a time. Article-structured texts return the `articles` selected by `article_no`, written as in `query_regulation` (single, range, list, up to 50 per call); without an article number only the article range is returned. Unstructured documents (guidelines, treaties) return `full_text`.
 </details>
 
 ---

@@ -170,6 +170,16 @@ def _single_checks(cache: CacheDB, clients: list) -> dict[str, tuple]:
     }
 
 
+async def _first_article(client: OtherRegulationClient, item_id: str) -> dict:
+    """分條的規範沒指定條號只回條號範圍，改讀前段條文（第一條常只有一句），才看得出條文擷取是否正常。"""
+    detail = await client.get(item_id)
+    if not detail.get("first_article"):
+        return detail
+    if detail.get("article_numbers"):  # 「壹」「貳」這類標籤不能組成區間，讀第一個
+        return await client.get(item_id, detail["first_article"])
+    return await client.get(item_id, f"{detail['first_article']}~{detail['last_article']}")
+
+
 async def _expect_stopped(client: AgencyInterpretationClient, item_id: str) -> dict:
     detail = await client.get(item_id)
     if detail.get("success") and detail.get("status") != "停止適用":
@@ -201,8 +211,9 @@ async def main(argv: list[str]) -> int:
                 if source_filter and src not in source_filter:
                     continue
                 kw = KEYWORDS.get((tool, src), default_kw)
+                read = _first_article if tool == "other_regulations" else (lambda c, i: c.get(i))
                 checks.append((tool, src, lambda c=client, s=src, k=kw, f=search: f(c, s, k),
-                               lambda i, c=client: c.get(i["id"])))
+                               lambda i, c=client, r=read: r(c, i["id"])))
         for name, (search, get) in _single_checks(cache, clients).items():
             if not tool_filter or tool_filter == name:
                 checks.append((name, "-", search, get))

@@ -1103,13 +1103,15 @@ async def search_other_regulations(keyword: str, source: str = "", page: int = 1
 
 @mcp.tool()
 async def get_other_regulation(regulation_id: str, article_no: str = "") -> dict:
-    """取得地方自治法規、條約協定或交易所規章的全文或單一條文。
+    """取得地方自治法規、條約協定或交易所規章的條文。
 
-    分條的規範回傳 articles（每條含 number、content）；要點、條約等未分條的回傳 full_text。
+    分條的規範依 article_no 回傳 articles（每條含 number、content），一次最多 50 條；不給條號時只回傳
+    article_count 與條號範圍，不回條文。要點、條約等未分條的文件回傳 full_text。
 
     Args:
         regulation_id: search_other_regulations 回傳的 id
-        article_no: 只取某一條（如「15」「15-1」「第十五條之一」）；不填 = 全文
+        article_no: 單條「15」「15-1」「第十五條之一」、區間「1~10」、多條「3,5,15-1」，可混用；
+            不填 = 分條的只回條號範圍，未分條的回全文
     """
     logger.info("get_other_regulation: %s article=%r", regulation_id, article_no)
     return await other_regs.get(regulation_id.strip(), article_no.strip())

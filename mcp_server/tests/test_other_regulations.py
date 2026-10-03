@@ -62,17 +62,30 @@ def test_resolve_sources_aliases():
     assert orx.resolve_sources("") == list(S)
 
 
-def test_shape_filters_article_and_keeps_complete_text():
-    data = {"title": "X", "articles": [{"number": "1", "content": "a" * 60001}, {"number": "2", "content": "b" * 6}]}
-    assert orx._shape(data, "第二條")["articles"] == [{"number": "2", "content": "bbbbbb"}]
+def test_shape_selects_articles_and_outlines_split_texts():
+    data = {"title": "X", "articles": [{"number": n, "content": n * 3} for n in ("1", "2", "3", "15-1")]}
+    assert orx._shape(data, "第二條")["articles"] == [{"number": "2", "content": "222"}]
+    assert [a["number"] for a in orx._shape(data, "一至三, 十五之一")["articles"]] == ["1", "2", "3", "15-1"]
+    picked = orx._shape(data, "2,9")
+    assert [a["number"] for a in picked["articles"]] == ["2"] and picked["missing"] == ["9"]
     with pytest.raises(LookupError):
-        orx._shape(data, "3")
-    complete = orx._shape(data, "")
-    assert not complete["truncated"] and complete["articles"] == data["articles"]
-    raw = "字" * 100001
-    assert orx._shape({"full_text": raw}, "")["full_text"] == raw
+        orx._shape(data, "9")
+    with pytest.raises(ValueError):
+        orx._shape(data, "abc")
+    outline = orx._shape(data, "")  # 分條的規範沒指定條號：只回條號範圍
+    assert "articles" not in outline and (outline["article_count"], outline["last_article"]) == (4, "15-1")
+    split = orx._shape({"title": "T", "full_text": "前言\n第一條 甲。\n第二條 乙。"}, "")
+    assert "full_text" not in split and split["article_count"] == 2 and split["preamble"] == "前言"
+    nested = {"title": "T", "articles": [{"number": n, "content": n} for n in ("2", "2-1", "2-1-1", "3")]}
+    assert [a["number"] for a in orx._shape(nested, "2-1-1")["articles"]] == ["2-1-1"]
+    assert [a["number"] for a in orx._shape(nested, "2-1~2-2")["articles"]] == ["2-1", "2-1-1"]
+    labeled = {"title": "T", "articles": [{"number": n, "content": n} for n in ("壹", "貳")]}
+    assert orx._shape(labeled, "")["article_numbers"] == ["壹", "貳"]
+    assert orx._shape(labeled, "貳")["articles"] == [{"number": "貳", "content": "貳"}]
     full = orx._shape({"title": "T", "full_text": "前言\n第一條 甲。\n第二條 乙。"}, "2")
     assert full["articles"] == [{"number": "2", "content": "乙。"}] and "full_text" not in full
+    raw = "一、要點。" * 20000  # 未分條的要點、條約：照原樣回傳全文
+    assert orx._shape({"full_text": raw}, "")["full_text"] == raw
     with pytest.raises(LookupError, match="未分條"):
         orx._shape({"title": "T", "full_text": "一、要點。"}, "1")
 
@@ -459,8 +472,9 @@ async def test_client_isolates_source_errors_prefixes_ids_and_filters_articles(t
         r = await client.get("a:GL000001", "第2條")
         assert r["articles"] == [{"number": "2", "content": "二"}] and not r["cached"]
         r = await client.get("a:GL000001", "")
-        assert r["cached"] and len(r["articles"]) == 2 and calls == ["GL000001"]
+        assert r["cached"] and r["article_count"] == 2 and "articles" not in r and calls == ["GL000001"]
         assert (await client.get("a:GL000001", "9"))["success"] is False
+        assert "條號寫法" in (await client.get("a:GL000001", "abc"))["error"]
         assert (await client.get("GL000001", ""))["success"] is False
     finally:
         await client.close()

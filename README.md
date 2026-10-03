@@ -171,7 +171,7 @@ Tools: ['search_judgments', 'get_judgment', 'query_regulation', 'get_pcode', 'se
 | 工具 | 用途 | 典型呼叫 |
 |---|---|---|
 | `search_other_regulations` | 搜尋全國法規資料庫以外的規範：地方自治法規、條約協定、交易所規章 | `search_other_regulations("違章建築", source="臺北市")` |
-| `get_other_regulation` | 取得全文或單一條文 | `get_other_regulation("taichung:GL001385", article_no="3")` |
+| `get_other_regulation` | 取得條文（單條、區間、多條；未分條的文件回全文） | `get_other_regulation("taichung:GL001385", article_no="3")` |
 
 ### 工具細節
 
@@ -604,7 +604,7 @@ search_other_regulations("營業細則", source="證交所")
 get_other_regulation("taichung:GL001385", article_no="3")   # 臺中市殯葬管理自治條例第 3 條
 ```
 
-不填 `source` 會同時查全部 28 個來源，建議指定。多數來源把整串關鍵字當成一個詞，請一次給一個詞。分條的規範回傳 `articles`，要點、條約等未分條的回傳 `full_text`。
+不填 `source` 會同時查全部 28 個來源，建議指定。多數來源把整串關鍵字當成一個詞，請一次給一個詞。分條的規範依 `article_no` 回傳 `articles`，寫法同 `query_regulation`（單條、區間、多條，一次最多 50 條），不給條號時只回傳條號範圍；要點、條約等未分條的文件回傳 `full_text`。
 </details>
 
 ---

@@ -51,3 +51,28 @@ async def test_stopped_canary_fails_when_marker_disappears():
     assert (await _expect_stopped(Client("停止適用"), "fsc:1"))["success"] is True
     assert (await _expect_stopped(Client("適用中"), "fsc:1"))["success"] is False
     assert (await _expect_stopped(Client(None), "fsc:1"))["success"] is False
+
+
+async def test_split_regulation_is_checked_by_its_first_article():
+    from mcp_server.healthcheck import _first_article
+
+    class Client:
+        async def get(self, item_id, article_no=""):
+            if not article_no:
+                return {"success": True, "article_count": 2, "first_article": "1", "last_article": "2"}
+            return {"success": True, "articles": [{"number": article_no, "content": "條文內容" * 20}]}
+
+    assert (await _check("other_regulations", "s", _ok_search, lambda i: _first_article(Client(), i["id"])))[2] == "OK"
+
+
+async def test_labelled_regulation_is_checked_by_its_first_label():
+    from mcp_server.healthcheck import _first_article
+
+    class Client:
+        async def get(self, item_id, article_no=""):
+            if not article_no:
+                return {"success": True, "first_article": "壹", "last_article": "貳", "article_numbers": ["壹", "貳"]}
+            assert article_no == "壹"
+            return {"success": True, "articles": [{"number": "壹", "content": "條文內容" * 20}]}
+
+    assert (await _check("other_regulations", "s", _ok_search, lambda i: _first_article(Client(), i["id"])))[2] == "OK"
