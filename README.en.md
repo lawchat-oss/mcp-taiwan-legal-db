@@ -771,6 +771,15 @@ Want to drive these tools from an A2A agent? See [`examples/agno-bindu/`](exampl
 **MCP client reports "server failed to start"**
 → Run the verify command from Quick Start step 4 directly. If it fails, the import chain is broken — read the traceback. If it passes, the issue is in the MCP client's launch configuration (wrong path, wrong cwd).
 
+**"官網瀏覽器連線或啟動失敗" (browser failed to start)**
+→ Sources that need a browser download Chromium automatically on first use; where downloads are blocked, install it by hand: `uvx --from mcp-taiwan-legal-db playwright install chromium` (development: `.venv/bin/playwright install chromium`).
+
+**"官網瀏覽器查詢逾時，可能仍停在驗證頁" / "官網驗證尚未完成" (site check not passed)**
+→ The site's check did not pass this time; try again later. This does not mean there are no results.
+
+**"此公開來源需要本機 OCR" (local OCR required)**
+→ Interior and Health and Welfare appeals need the `[captcha]` extra: `pip install "mcp-taiwan-legal-db[captcha]"`. The Claude Code plugin includes it.
+
 **`ssl.SSLCertVerificationError: ... Missing Subject Key Identifier`**
 → This is OpenSSL 3.6+ broadly rejecting the TWCA Global Root CA — **not a stale-`certifi` problem**. This repo uses [`truststore`](https://github.com/sethmlarson/truststore) so Python validates against the OS-native trust store (macOS Security framework, Windows CryptoAPI, Linux system CA), keeping **full SSL verification (`verify=True`) on every path** — it never uses `verify=False`. This works on macOS, Windows, and Linux with OpenSSL <3.6. Linux with OpenSSL 3.6+ (Fedora 40+, future Ubuntu LTS) may still be affected — issue reports welcome.
 
@@ -952,7 +961,7 @@ mcp-taiwan-legal-db/
     │   ├── ip_guidelines.py        # IPO patent and trademark examination guidelines
     │   ├── fint.py                 # search_precedents, get_precedent (Judicial Yuan law database)
     │   ├── admin_decisions.py      # search_administrative_decisions, get_administrative_decision
-    │   ├── quasi_judicial.py       # Quasi-judicial decisions (procurement complaints, labor rulings, CSPTC, FSC sanctions, Control Yuan, lawyer discipline)
+    │   ├── quasi_judicial.py       # Quasi-judicial decisions (procurement complaints, labor rulings, CSPTC, FSC sanctions, Control Yuan, lawyer and medical discipline)
     │   ├── appeals.py              # Ministries' and local governments' appeal decisions
     │   ├── legislative.py          # get_legislative_history (Legislative Yuan law system)
     │   ├── legislative_records.py  # search_legislative_records, get_legislative_record
@@ -961,7 +970,11 @@ mcp-taiwan-legal-db/
     │   ├── literature.py           # search_legal_literature, get_legal_literature
     │   ├── other_regulations.py    # search_other_regulations, get_other_regulation
     │   ├── tls.py                  # Bundled TWCA intermediates for sites that omit them
-    │   └── pdf_text.py             # PDF text extraction (opinions, decisions, case-file documents)
+    │   ├── pdf_text.py             # PDF text extraction (opinions, decisions, case-file documents)
+    │   ├── waf_bypass.py           # Judicial Yuan F5 WAF: Playwright cookies; installs Chromium when missing
+    │   ├── public_browser.py       # Sites that need a browser (JavaScript / Cloudflare checks, single-page apps)
+    │   ├── public_captcha.py       # Local OCR for image captchas (the [captcha] extra)
+    │   └── medical_discipline.py   # MOHW medical disciplinary notices
     └── tests/             # pytest suite
 ```
 
@@ -975,7 +988,7 @@ mcp-taiwan-legal-db/
 The unit tests mock the official sites, so they cannot tell when a site changes. Before a release, or when someone reports a source returning nothing, run the live health check: it queries each source once, fetches the first full text, and confirms the validity marking still reads on a few interpretations known to be discontinued.
 
 ```bash
-.venv/bin/python -m mcp_server.healthcheck                          # everything (about 130 checks, a few minutes)
+.venv/bin/python -m mcp_server.healthcheck                          # everything (about 150 checks, a few minutes)
 .venv/bin/python -m mcp_server.healthcheck interpretations mof mol  # one tool, some sources
 .venv/bin/python -m mcp_server.healthcheck status                   # validity markings only
 ```

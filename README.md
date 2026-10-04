@@ -748,6 +748,15 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 **MCP client 回報「伺服器啟動失敗」**
 → 直接跑 Quick Start 步驟 3 的驗證指令。若失敗，代表 import chain 壞了 — 看 traceback。若通過，問題在 MCP client 的啟動設定（路徑或 cwd 錯了）。
 
+**「官網瀏覽器連線或啟動失敗」**
+→ 需要瀏覽器的來源第一次使用時會自動下載 Chromium；無法連外下載的環境請手動安裝：`uvx --from mcp-taiwan-legal-db playwright install chromium`（開發環境：`.venv/bin/playwright install chromium`）。
+
+**「官網瀏覽器查詢逾時，可能仍停在驗證頁」「官網驗證尚未完成」**
+→ 該官網的檢查這次沒有通過，稍後再試。這不代表查無資料。
+
+**「此公開來源需要本機 OCR」**
+→ 內政部、衛福部訴願需要 `[captcha]` 額外依賴：`pip install "mcp-taiwan-legal-db[captcha]"`。Claude Code plugin 已內含。
+
 **`ssl.SSLCertVerificationError: ... Missing Subject Key Identifier`**
 → 這是 OpenSSL 3.6+ 對 TWCA Global Root CA 的廣泛 rejection，**不是 certifi 舊的問題**。本 repo 透過 [`truststore`](https://github.com/sethmlarson/truststore) 套件讓 Python 改用作業系統原生的 trust store（macOS Security framework、Windows CryptoAPI、Linux 系統 CA），**所有路徑都保留完整 SSL 驗證（`verify=True`）**，不使用 `verify=False`。這在 macOS、Windows 以及 OpenSSL <3.6 的 Linux 都能正常工作。OpenSSL 3.6+ 的 Linux 環境（Fedora 40+、未來的 Ubuntu LTS）目前可能仍有問題，歡迎 issue 回報。
 
@@ -929,7 +938,7 @@ mcp-taiwan-legal-db/
     │   ├── ip_guidelines.py        # 智慧局專利、商標審查基準
     │   ├── fint.py                 # search_precedents, get_precedent（司法院法學資料檢索系統）
     │   ├── admin_decisions.py      # search_administrative_decisions, get_administrative_decision
-    │   ├── quasi_judicial.py       # 準司法機關決定（採購申訴、裁決、保訓會、金管會裁罰、監察院、律師懲戒）
+    │   ├── quasi_judicial.py       # 準司法機關決定（採購申訴、裁決、保訓會、金管會裁罰、監察院、律師懲戒、醫事懲戒）
     │   ├── appeals.py              # 各部會與縣市政府訴願決定
     │   ├── legislative.py          # get_legislative_history（立法院法律系統）
     │   ├── legislative_records.py  # search_legislative_records, get_legislative_record
@@ -938,7 +947,11 @@ mcp-taiwan-legal-db/
     │   ├── literature.py           # search_legal_literature, get_legal_literature
     │   ├── other_regulations.py    # search_other_regulations, get_other_regulation
     │   ├── tls.py                  # 未送中繼憑證網站用的 TWCA 中繼憑證
-    │   └── pdf_text.py             # PDF 文字擷取（意見書、決定書、處分書、卷內文書共用）
+    │   ├── pdf_text.py             # PDF 文字擷取（意見書、決定書、處分書、卷內文書共用）
+    │   ├── waf_bypass.py           # 司法院 F5 WAF：以 Playwright 取得 cookie，缺 Chromium 時自動安裝
+    │   ├── public_browser.py       # 需要瀏覽器的官網（JavaScript／Cloudflare 檢查、單頁應用程式）
+    │   ├── public_captcha.py       # 圖形驗證碼的本機 OCR（[captcha] 額外依賴）
+    │   └── medical_discipline.py   # 衛福部醫事懲戒公告
     └── tests/             # pytest 測試
 ```
 
@@ -952,7 +965,7 @@ mcp-taiwan-legal-db/
 單元測試以 MockTransport 模擬官網，看不出官網改版。發版前、或有人回報某個來源查不到東西時，跑即時健康檢查：每個來源實際查一次、再取第一筆全文，並用幾件已知停止適用的函釋確認效力標示還讀得到。
 
 ```bash
-.venv/bin/python -m mcp_server.healthcheck                          # 全部（約 130 項，幾分鐘）
+.venv/bin/python -m mcp_server.healthcheck                          # 全部（約 150 項，幾分鐘）
 .venv/bin/python -m mcp_server.healthcheck interpretations mof mol  # 只查指定工具與來源
 .venv/bin/python -m mcp_server.healthcheck status                   # 只查效力標示
 ```
