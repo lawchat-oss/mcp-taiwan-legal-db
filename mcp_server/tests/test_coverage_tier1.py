@@ -120,3 +120,12 @@ def test_english_article_number_trailing_period():
                                    "EngLawArticles": [{"EngArticleType": "A", "EngArticleNo": "Article 34-1.",
                                                        "EngArticleContent": "x"}]}]))
     assert rows[0]["articles"][0]["number"] == "34-1"
+
+
+def test_search_interpretations_max_results_bounds(monkeypatch):
+    for bad in (0, -1):
+        r = cc.search_interpretations(max_results=bad)
+        assert r["success"] is False and "max_results" in r["error"]
+    monkeypatch.setattr(cc, "_load_old_listing", lambda: {n: str(n) for n in range(1, 301)})
+    r = cc.search_interpretations(include_new=False, max_results=10_000)
+    assert len(r["results"]) == 200 and r["truncated"] is True

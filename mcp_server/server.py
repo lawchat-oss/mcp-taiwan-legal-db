@@ -555,7 +555,7 @@ def search_interpretations(
         number_to: 截止號次（含），0=不篩選
         include_old: 包含舊制釋字（year=0 時才生效）
         include_new: 包含新制憲判字
-        max_results: 回傳筆數上限（預設 30）
+        max_results: 回傳筆數上限（預設 30，上限 200）
     """
     return _cc_search_interpretations(
         keyword, year, number_from, number_to,

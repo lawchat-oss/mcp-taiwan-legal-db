@@ -1057,8 +1057,11 @@ def search_interpretations(
         number_to: 截止號次（含）。0 = 不篩選
         include_old: 是否包含舊制釋字（year=0 時才生效）
         include_new: 是否包含新制憲判字
-        max_results: 回傳筆數上限（預設 30）
+        max_results: 回傳筆數上限（預設 30，上限 200）
     """
+    if max_results <= 0:
+        return error_response("max_results 必須大於 0")
+    max_results = min(max_results, 200)
     kw = keyword.strip()
     results: list[dict] = []
     errors: list[str] = []
