@@ -308,6 +308,9 @@ async def query_regulation(
 
     Returns:
         包含法規條文的字典：law (pcode, name, status), articles, source_url,
+        articles 每條的 content 以換行分項（款前縮一個全形空白、目兩個），另附 paragraphs
+        （[{no, text, items: [{no, text, subitems}]}]，項號從 1 起算）與 paragraph_count，
+        引用「第○項第○款」時以此為準；官網頁面結構無法辨識時 paragraphs 為空、paragraph_count 為 0,
         history（選填，整部法規的修法沿革文字）,
         article_history（選填，僅在 include_history＋單一條號時提供，為該條歷次條文全文）
     """

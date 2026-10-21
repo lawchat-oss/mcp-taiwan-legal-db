@@ -28,6 +28,89 @@ def _looks_like_article(text: str) -> bool:
     return True
 
 
+# 條文的項／款／目：官網把每一項、款、目各放成 .law-article 底下的一個獨立 <div>，
+# 以 class 區分層級（line-0000 項、line-0004 款、line-0006 目，更深的層級另有其他 line-XXXX）。
+# 若直接 get_text(strip=True)，各項會黏成一串（「…提前終止租賃契約。出租人依前項規定…」），
+# 下游無從分辨第幾項。這裡逐一讀取子 div：content 以換行分隔、款縮排一個全形空白、目兩個、
+# 更深三個（與官方開放資料 ArticleContent 以 \r\n 分項分款同語意），並另回結構化的 paragraphs。
+REGULATION_PARSER_VERSION = 2
+_INDENT = "\u3000"
+_LEVEL_BY_CLASS = {"line-0000": 0, "line-0004": 1, "line-0006": 2}
+_DELETED_TEXTS = {"（刪除）", "(刪除)"}
+
+
+def _block_level(classes: list[str]) -> int | None:
+    for c in classes:
+        if c in _LEVEL_BY_CLASS:
+            return _LEVEL_BY_CLASS[c]
+        if re.fullmatch(r"line-\d{4}", c):
+            return 3
+    return None
+
+
+def _article_blocks(el) -> list[tuple[int, str]] | None:
+    """.law-article → [(層級, 文字)]；任一子 div 沒有可辨識的 line-XXXX class 就回 None（交給舊邏輯，不猜）。"""
+    if el is None:
+        return None
+    blocks: list[tuple[int, str]] = []
+    for child in el.find_all("div", recursive=False):
+        level = _block_level(child.get("class", []) or [])
+        if level is None:
+            return None
+        text = child.get_text(strip=True)
+        if text:
+            blocks.append((level, text))
+    # 子 div 之外還有散落文字 → 分項會漏字，寧可退回整段
+    if not blocks or "".join(t for _, t in blocks) != el.get_text(strip=True):
+        return None
+    return blocks
+
+
+def _render_blocks(blocks: list[tuple[int, str]]) -> str:
+    return "\n".join(_INDENT * level + text for level, text in blocks)
+
+
+def _paragraphs_from_blocks(blocks: list[tuple[int, str]]) -> list[dict]:
+    """[(層級, 文字)] → [{no, text, items: [{no, text, subitems: [{no, text, children: [...]}]}]}]。
+
+    項號一律從 1 起算（不論官網是否顯示項號）；但書、前段／後段屬同一項內的文字，不拆。
+    """
+    paragraphs: list[dict] = []
+    for level, text in blocks:
+        if level == 0 or not paragraphs:
+            paragraphs.append({"no": len(paragraphs) + 1, "text": text, "items": []})
+            continue
+        para = paragraphs[-1]
+        if level == 1 or not para["items"]:
+            para["items"].append({"no": len(para["items"]) + 1, "text": text, "subitems": []})
+            continue
+        item = para["items"][-1]
+        if level == 2 or not item["subitems"]:
+            item["subitems"].append({"no": len(item["subitems"]) + 1, "text": text, "children": []})
+            continue
+        item["subitems"][-1]["children"].append(text)
+    return paragraphs
+
+
+def _structured_fields(blocks: list[tuple[int, str]] | None, content: str) -> dict:
+    """條文的結構化欄位。blocks 為 None（官網頁面結構無法辨識）時 paragraphs 為空、paragraph_count 為 0。"""
+    deleted = content.strip() in _DELETED_TEXTS
+    paragraphs = [] if (deleted or not blocks) else _paragraphs_from_blocks(blocks)
+    fields = {"paragraphs": paragraphs, "paragraph_count": len(paragraphs)}
+    if deleted:
+        fields["deleted"] = True
+    return fields
+
+
+def _article_from_col_data(number: str, col_data) -> dict | None:
+    """LawAll／歷史版本頁面的一條：.col-data 內有可辨識的項款結構就分項，否則沿用整段文字。"""
+    blocks = _article_blocks(col_data.select_one(".law-article"))
+    content = _render_blocks(blocks) if blocks else col_data.get_text(strip=True)
+    if not content:
+        return None
+    return {"number": number, "content": content, **_structured_fields(blocks, content)}
+
+
 def parse_single_article(html: str) -> dict:
     """解析 LawSingle.aspx 頁面，擷取單一條文"""
     soup = BeautifulSoup(html, "lxml")
@@ -36,6 +119,8 @@ def parse_single_article(html: str) -> dict:
         "article_number": "",
         "article_content": "",
         "last_amended": "",
+        "paragraphs": [],
+        "paragraph_count": 0,
     }
 
     # 法規名稱
@@ -59,7 +144,9 @@ def parse_single_article(html: str) -> dict:
     if content_el:
         text = content_el.get_text(strip=True)
         if _looks_like_article(text):
-            result["article_content"] = text
+            blocks = _article_blocks(content_el) if "law-article" in (content_el.get("class") or []) else None
+            result["article_content"] = _render_blocks(blocks) if blocks else text
+            result.update(_structured_fields(blocks, result["article_content"]))
     else:
         # fallback：取 body 中最長的文字段落
         paragraphs = soup.find_all(["p", "div", "td"])
@@ -129,14 +216,11 @@ def parse_law_all(html: str) -> dict:
                 col_data = el.select_one(".col-data")
                 if col_no and col_data:
                     number_text = col_no.get_text(strip=True)
-                    content_text = col_data.get_text(strip=True)
                     num_match = re.search(r"第\s*(\S+?)\s*條", number_text)
-                    if num_match and content_text:
-                        article_num = num_match.group(1)
-                        result["articles"].append({
-                            "number": article_num,
-                            "content": content_text,
-                        })
+                    article = _article_from_col_data(num_match.group(1), col_data) if num_match else None
+                    if article:
+                        article_num = article["number"]
+                        result["articles"].append(article)
                         # 回填暫存的章節標題
                         for ch in pending_chapters:
                             ch["first_article"] = article_num
@@ -153,13 +237,10 @@ def parse_law_all(html: str) -> dict:
             col_data = row.select_one(".col-data")
             if col_no and col_data:
                 number_text = col_no.get_text(strip=True)
-                content_text = col_data.get_text(strip=True)
                 num_match = re.search(r"第\s*(\S+?)\s*條", number_text)
-                if num_match and content_text:
-                    result["articles"].append({
-                        "number": num_match.group(1),
-                        "content": content_text,
-                    })
+                article = _article_from_col_data(num_match.group(1), col_data) if num_match else None
+                if article:
+                    result["articles"].append(article)
 
     # fallback: 舊版表格結構（tr > td）
     if not result["articles"]:
@@ -173,6 +254,7 @@ def parse_law_all(html: str) -> dict:
                     result["articles"].append({
                         "number": num_match.group(1),
                         "content": content_text,
+                        **_structured_fields(None, content_text),
                     })
 
     return result

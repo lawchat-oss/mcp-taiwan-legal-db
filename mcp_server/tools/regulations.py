@@ -22,7 +22,9 @@ from mcp_server.config import (
     validate_url_domain,
 )
 from mcp_server.cache.db import CacheDB
-from mcp_server.parsers.regulation_parser import parse_single_article, parse_law_all, _looks_like_article, INVALID_LAW_NAMES
+from mcp_server.parsers.regulation_parser import (
+    parse_single_article, parse_law_all, _looks_like_article, INVALID_LAW_NAMES, REGULATION_PARSER_VERSION,
+)
 from mcp_server.tools._errors import error_response
 from mcp_server.tools.agency_interpretations import _Snapshot
 from mcp_server.updater import _extract_pcode_from_url
@@ -365,6 +367,21 @@ _EN_LAWS = _Snapshot(EN_LAW_URL, "en_laws.zip", _en_parse, min_rows=500)
 _EN_ORDERS = _Snapshot(EN_ORDER_URL, "en_orders.zip", _en_parse, min_rows=500)
 
 
+# 快取裡的條文是由哪一版 parser 產生的。parser 輸出格式改變（例如 v2 起條文分項、附 paragraphs）時，
+# 舊版寫入的快取列一律視為未命中、重新抓取，不必等 TTL 到期或手動清快取。
+_PARSER_KEY = "parser_version"
+
+
+def _current_parse(cached: dict | None) -> dict | None:
+    if not cached or cached.get(_PARSER_KEY) != REGULATION_PARSER_VERSION:
+        return None
+    return {k: v for k, v in cached.items() if k != _PARSER_KEY}
+
+
+def _with_parser_version(data: dict) -> dict:
+    return {**data, _PARSER_KEY: REGULATION_PARSER_VERSION}
+
+
 class RegulationClient:
     """法規資料庫 HTTP 客戶端"""
 
@@ -436,7 +453,7 @@ class RegulationClient:
     async def get_article(self, pcode: str, article_no: str) -> dict:
         """查詢單一條文"""
         # 快取查詢
-        cached = await self.cache.get_regulation(pcode, article_no)
+        cached = _current_parse(await self.cache.get_regulation(pcode, article_no))
         if cached:
             # 修正舊快取：覆蓋 status + 檢查垃圾內容
             if "law" in cached:
@@ -485,12 +502,15 @@ class RegulationClient:
                 "articles": [{
                     "number": article_no,
                     "content": article_content,
+                    "paragraphs": parsed.get("paragraphs", []),
+                    "paragraph_count": parsed.get("paragraph_count", 0),
+                    **({"deleted": True} if parsed.get("deleted") else {}),
                 }],
                 "source_url": url,
             }
 
             # 寫入快取
-            await self.cache.set_regulation(pcode, data, article_no)
+            await self.cache.set_regulation(pcode, _with_parser_version(data), article_no)
             return {"success": True, "cached": False, **data}
 
         except httpx.HTTPError as e:
@@ -546,7 +566,7 @@ class RegulationClient:
 
     async def get_all_articles(self, pcode: str, refresh: bool = False) -> dict:
         """查詢法規全文（所有條文）；refresh=True 略過快取重新抓取"""
-        cached = None if refresh else await self.cache.get_regulation(pcode, "")
+        cached = None if refresh else _current_parse(await self.cache.get_regulation(pcode, ""))
         if cached:
             # 修正舊快取：覆蓋 status
             if "law" in cached:
@@ -596,7 +616,7 @@ class RegulationClient:
                 "source_url": url,
             }
 
-            await self.cache.set_regulation(pcode, data, "")
+            await self.cache.set_regulation(pcode, _with_parser_version(data), "")
             return {"success": True, "cached": False, **data}
 
         except httpx.HTTPError as e:
@@ -686,7 +706,7 @@ class RegulationClient:
         失敗時 raise（由呼叫端區分「抓取失敗」與「該版無此條」）。
         """
         cache_key = f"__ver__{lnndate}_{lser}"
-        cached = await self.cache.get_regulation(pcode, cache_key)
+        cached = _current_parse(await self.cache.get_regulation(pcode, cache_key))
         if cached is not None:
             return cached.get("articles", [])
 
@@ -706,7 +726,7 @@ class RegulationClient:
                     # 全文頁竟解析不出任何條文 → 視為失敗（避免誤判整版為空）
                     raise ValueError("版本全文解析為空")
                 # 歷史版本不會再變動，可長期快取
-                await self.cache.set_regulation(pcode, {"articles": articles}, cache_key)
+                await self.cache.set_regulation(pcode, _with_parser_version({"articles": articles}), cache_key)
                 return articles
             except (httpx.HTTPError, ValueError) as e:
                 last_exc = e
