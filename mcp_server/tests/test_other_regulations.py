@@ -316,9 +316,14 @@ MOFA_ROW = """<form action="./Result.aspx?x=1"><input type="hidden" name="__VIEW
 async def test_mofa_search_jumps_page_by_postback_and_get_pdf():
     posts = []
 
+    dropped = []
+
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("ShowPicOut.aspx"):
             assert request.url.params["FileFolder"] == "21"
+            if not dropped:  # 外交部主機偶爾讀到一半斷線：第一次斷、重抓成功
+                dropped.append(1)
+                raise httpx.ReadError("connection reset", request=request)
             return httpx.Response(200, content=b"%PDF-1.3 scanned")
         if request.method == "POST":
             posts.append(dict(parse_qsl(request.content.decode())))

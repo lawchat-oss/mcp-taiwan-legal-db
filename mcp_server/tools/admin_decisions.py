@@ -19,8 +19,9 @@ from urllib.parse import urlencode
 import httpx
 from bs4 import BeautifulSoup
 
+from mcp_server import config
 from mcp_server.cache.db import CacheDB
-from mcp_server.tools import appeals, fint, quasi_judicial
+from mcp_server.tools import appeals, fint, medical_discipline, quasi_judicial
 from mcp_server.tools._errors import error_response
 from mcp_server.tools.pdf_text import pdf_to_text
 
@@ -249,6 +250,26 @@ SOURCES = {
 # 律師懲戒（需精確關鍵字）、各部會與地方政府訴願，都要指定才查
 DEFAULT_SOURCES = ("ey", "ftc", "uflb", "csptc", "fsc_sanction")
 
+# 需要通過官網驗證碼的來源：預設不查詢、不連官網，只回官網網址讓使用者自己去查；
+# 使用者設環境變數 MCP_TAIWAN_LEGAL_DB_ENABLE_CAPTCHA_SOURCES=1 才開啟（README「預設關閉的來源」）
+CAPTCHA_SOURCES = {
+    "moi": appeals._MOI_BASE,
+    "mohw": appeals._MOHW_BASE,
+    "mol": appeals._MOL_BASE + "AppealCaseDecision",
+    "medical_discipline": medical_discipline.BASE + "DISSearch/MASearchDIS",
+}
+CAPTCHA_NOTICE = ("內政部、衛福部、勞動部訴願與醫事懲戒需要通過官網驗證碼，預設不查詢。"
+                  "啟用前請確認符合各網站的使用規定與相關法令，使用責任由使用者自行承擔。")
+_CAPTCHA_OFF = CAPTCHA_NOTICE + "啟用方式：設定環境變數 MCP_TAIWAN_LEGAL_DB_ENABLE_CAPTCHA_SOURCES=1 後重新啟動。"
+
+
+def captcha_off(key: str) -> bool:
+    return key in CAPTCHA_SOURCES and not config.ENABLE_CAPTCHA_SOURCES
+
+
+def _off_message(key: str) -> str:
+    return f"{SOURCES[key][0]}：此來源預設關閉，請至官網查詢 {CAPTCHA_SOURCES[key]} 。{_CAPTCHA_OFF}"
+
 
 def resolve_sources(source: str) -> list[str] | None:
     if not source.strip():
@@ -278,14 +299,20 @@ class AdminDecisionClient:
         params = {"tool": "admin_decisions", "keyword": keyword, "sources": keys, "year_from": year_from,
                   "year_to": min(year_to, date.today().year - 1911) if year_to else 0,
                   "doc_number": doc_number, "page": page}
+        if any(k in CAPTCHA_SOURCES for k in keys):  # 開關不同的結果不共用快取
+            params["captcha_sources"] = config.ENABLE_CAPTCHA_SOURCES
         cached = await self.cache.get_search(params)
         if cached:
             return {**cached, "cached": True}
 
         async def run(key: str) -> dict:
             label, _, search, _ = SOURCES[key]
+            if captcha_off(key):
+                return {"source": label, "total": 0, "items": [], "disabled": True,
+                        "source_url": CAPTCHA_SOURCES[key], "note": _off_message(key)}
             try:
-                return await search(self.http, keyword, year_from, params["year_to"], doc_number, page)
+                g = await search(self.http, keyword, year_from, params["year_to"], doc_number, page)
+                return g | {"notice": CAPTCHA_NOTICE} if key in CAPTCHA_SOURCES else g
             except Exception as e:  # 單一來源掛掉不拖垮其他來源
                 logger.warning("處分／訴願搜尋失敗 %s: %s", key, e, exc_info=not isinstance(e, httpx.HTTPError))
                 return {"source": label, "error": f"{type(e).__name__}: {e}"}
@@ -308,6 +335,8 @@ class AdminDecisionClient:
         key, _, native_id = decision_id.partition(":")
         if key not in SOURCES or not native_id:
             return error_response(f"id 格式錯誤：「{decision_id}」，請使用 search_administrative_decisions 回傳的 id")
+        if captcha_off(key):
+            return error_response(_off_message(key), source_url=CAPTCHA_SOURCES[key])
         cache_key = f"decision:v2:{decision_id}"  # v2 removes both assembly and return character limits
         cached = await self.cache.get_judgment(cache_key)
         if cached:
@@ -322,6 +351,8 @@ class AdminDecisionClient:
         full = data["full_text"]
         data = {"id": decision_id, "source": label, **data,
                 "full_text": full, "full_text_truncated": False}
+        if key in CAPTCHA_SOURCES:
+            data["notice"] = CAPTCHA_NOTICE
         if full:  # 掃描檔、尚未公開理由的案件不長期快取，日後可能取得全文
             await self.cache.set_judgment(cache_key, data, source="admin_decision")
         return {"success": True, "cached": False, **data}

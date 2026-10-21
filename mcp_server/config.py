@@ -47,6 +47,9 @@ def _user_data_dir() -> Path:
 
 USER_DATA_DIR = _user_data_dir()
 
+# 需要通過官網驗證碼的來源（內政部、衛福部、勞動部訴願、醫事懲戒）預設不查詢，使用者自己設 1 才開啟
+ENABLE_CAPTCHA_SOURCES = os.environ.get("MCP_TAIWAN_LEGAL_DB_ENABLE_CAPTCHA_SOURCES", "").strip().lower() in ("1", "true")
+
 
 def pcode_data_dir() -> Path:
     """pcode_all.json / law_histories.json 的讀取目錄。

@@ -64,13 +64,24 @@ claude mcp add taiwan-legal-db mcp-taiwan-legal-db --scope user
 
 Then `/mcp` to reload, and Claude will pick up the 26 MCP tools on natural-language queries.
 
-**Chromium**: the Judicial Yuan WAF fallback and the sources that need a browser (Ministry of Culture appeals, NCC, Yunlin County and others) download and install it automatically on first use (about 150 MB, once). In environments without outbound downloads, install it in advance:
+**Chromium**: the Judicial Yuan WAF (needed as soon as the server first starts without cookies; see [WAF Handling](#waf-handling)) and the sources that need a browser (Ministry of Culture appeals, NCC, Yunlin County and others) download and install it automatically on first use (about 150 MB, once). In environments without outbound downloads, install it in advance:
 
 ```bash
 uvx --from mcp-taiwan-legal-db playwright install chromium    # launched only when a query needs a browser; idle otherwise
 ```
 
-**Captcha recognition**: Interior and Health and Welfare appeals need a local OCR dependency for their image captchas; install with the `[captcha]` extra: `pip install "mcp-taiwan-legal-db[captcha]"` (uvx: `uvx --from "mcp-taiwan-legal-db[captcha]" mcp-taiwan-legal-db`; the Claude Code plugin includes it). Without it, those two sources report that it is missing; other sources are unaffected.
+### Sources off by default
+
+Interior, Health and Welfare and Labor appeals and the medical discipline notices require passing the official site's captcha and are not queried by default. Before enabling them, make sure doing so complies with each site's terms of use and the applicable law; you are responsible for that use.
+
+While they are off, a query that reaches them (for example `source="內政部"` or `source="訴願"`) sends nothing to those sites and returns "此來源預設關閉" (this source is off by default) with the official site's URL so you can search there yourself. To enable them, set the environment variable `MCP_TAIWAN_LEGAL_DB_ENABLE_CAPTCHA_SOURCES=1` and restart; Interior and Health and Welfare also need the local OCR dependency `[captcha]`:
+
+```bash
+pip install "mcp-taiwan-legal-db[captcha]"
+claude mcp add taiwan-legal-db --scope user -e MCP_TAIWAN_LEGAL_DB_ENABLE_CAPTCHA_SOURCES=1 -- mcp-taiwan-legal-db
+```
+
+The Claude Code plugin does not enable these sources and does not include `[captcha]`; to use them, install as above.
 
 ---
 
@@ -519,7 +530,7 @@ search_administrative_decisions(keyword="違規停車", source="臺北市,新北
 get_administrative_decision("ey:A-115-000633")                             # text extracted from the PDF
 ```
 
-Decisions are returned as the official sites publish them: most agencies mask the parties' names (○○), while some older cases (Executive Yuan cases filed up to ROC 108, Ministry of Justice decisions from before about ROC 112) and the Council of Indigenous Peoples' decisions are published unmasked; this server does not mask them further. Labor uses its public voice-verification endpoint; Interior and Health and Welfare use local image OCR (`[captcha]`); Culture uses Playwright. Interior, Environment and Health and Welfare default to the current year. Education and Agriculture are limited to five pages. Keelung and CEC search titles; Personnel Administration filters only the requested page. Finance and Taoyuan remain unreachable from the test environment; Tainan verification is still unreliable and was not added. Names of disciplined lawyers are officially public. `source="醫事懲戒"` queries currently posted medical disciplinary notices (default: physicians; a profession prefix changes the category), matching names, locations and certificate numbers. Scanned decisions are supplied as PDF links. When a PDF has no extractable text (mostly FTC files before 2008 or scans), `pdf_url` is returned for the user to open.
+Decisions are returned as the official sites publish them: most agencies mask the parties' names (○○), while some older cases (Executive Yuan cases filed up to ROC 108, Ministry of Justice decisions from before about ROC 112) and the Council of Indigenous Peoples' decisions are published unmasked; this server does not mask them further. Interior, Health and Welfare and Labor appeals and the medical discipline notices are off by default (see [Sources off by default](#sources-off-by-default)); once enabled, Labor uses its public voice-verification endpoint and Interior and Health and Welfare use local image OCR (`[captcha]`). Culture uses Playwright. Interior, Environment and Health and Welfare default to the current year. Education and Agriculture are limited to five pages. Keelung and CEC search titles; Personnel Administration filters only the requested page. Finance and Taoyuan remain unreachable from the test environment; Tainan verification is still unreliable and was not added. Names of disciplined lawyers are officially public. `source="醫事懲戒"` queries currently posted medical disciplinary notices (default: physicians; a profession prefix changes the category), matching names, locations and certificate numbers. Scanned decisions are supplied as PDF links. When a PDF has no extractable text (mostly FTC files before 2008 or scans), `pdf_url` is returned for the user to open.
 </details>
 
 <details>
@@ -777,8 +788,11 @@ Want to drive these tools from an A2A agent? See [`examples/agno-bindu/`](exampl
 **"官網瀏覽器查詢逾時，可能仍停在驗證頁" / "官網驗證尚未完成" (site check not passed)**
 → The site's check did not pass this time; try again later. This does not mean there are no results.
 
+**"此來源預設關閉" (this source is off by default)**
+→ The source requires passing the official site's captcha and is not queried by default; search at the official URL in the response, or see [Sources off by default](#sources-off-by-default).
+
 **"此公開來源需要本機 OCR" (local OCR required)**
-→ Interior and Health and Welfare appeals need the `[captcha]` extra: `pip install "mcp-taiwan-legal-db[captcha]"`. The Claude Code plugin includes it.
+→ The off-by-default sources are enabled, but Interior and Health and Welfare still need the `[captcha]` extra: `pip install "mcp-taiwan-legal-db[captcha]"`.
 
 **`ssl.SSLCertVerificationError: ... Missing Subject Key Identifier`**
 → This is OpenSSL 3.6+ broadly rejecting the TWCA Global Root CA — **not a stale-`certifi` problem**. This repo uses [`truststore`](https://github.com/sethmlarson/truststore) so Python validates against the OS-native trust store (macOS Security framework, Windows CryptoAPI, Linux system CA), keeping **full SSL verification (`verify=True`) on every path** — it never uses `verify=False`. This works on macOS, Windows, and Linux with OpenSSL <3.6. Linux with OpenSSL 3.6+ (Fedora 40+, future Ubuntu LTS) may still be affected — issue reports welcome.
@@ -791,10 +805,10 @@ The Judicial Yuan's `judgment.judicial.gov.tw` is behind an F5 BIG-IP ASM WAF. P
 
 This project uses a hybrid strategy:
 
-- Requests go out via httpx directly by default (~0.25s)
-- When a block is detected (response contains `Request Rejected` or JS challenge markers `bobcmn` / `TSPD`), it falls back to Playwright to execute the JS challenge
-- The resulting TSPD cookies are persisted to `.judicial_cookies.json` in the user data directory (0600 permissions)
-- Subsequent queries resume via httpx with the refreshed cookies
+- At server startup, if the user data directory has no `.judicial_cookies.json` yet, it opens Playwright once in the background (installing Chromium if missing) so the first query does not have to wait
+- Playwright opens the search page in headless Chromium, lets the site's own JS challenge run, and takes the cookies the browser was given; no token is computed or forged
+- The cookies are persisted to `.judicial_cookies.json` in the user data directory (0600 permissions), and later queries send them with plain httpx requests (~0.25s); they have no set lifetime and are used until a request is blocked
+- When a block is detected (response contains `Request Rejected` or JS challenge markers `bobcmn` / `TSPD`), it reruns Playwright once and retries once
 
 `cons.judicial.gov.tw` (Constitutional Court) and `law.moj.gov.tw` (regulations) are not affected — they bypass the WAF path entirely.
 
@@ -872,7 +886,7 @@ Endpoints, query methods, coverage limits and the sources not covered are in [SO
 
 `get_judgment` accepts a user-supplied URL, and `mcp_server/config.py:ALLOWED_DOMAINS` restricts that to the judgment and regulation domains; every other tool only calls the fixed endpoints above and never takes an arbitrary URL. The following sites disallow crawlers in robots.txt (or exclude specific paths); for those the server only performs single, user-triggered lookups and never bulk-fetches: the Judicial Yuan law database (legal.judicial.gov.tw), the Ministry of Health and Welfare system (mohwlaw.mohw.gov.tw), the Executive Yuan appeals site (appeal.ey.gov.tw), the Legislative Yuan parliamentary site (ppg.ly.gov.tw), the MOI Department of Land Administration (www.land.moi.gov.tw), the appeal full-text path of the Taipei City regulation system (laws.gov.taipei), the treaty search of the national regulation database (law.moj.gov.tw), the Ministry of Finance `/download/` files (www.mof.gov.tw) and the DGPA website (www.dgpa.gov.tw). The securities and futures regulation system (www.selaw.com.tw) forbids republishing without written permission, so TPEx and TAIFEX rules are for reference only and results carry a notice. Interpretations, resolutions, appeal and FTC decisions and similar documents are official documents, which Taiwan's Copyright Act Art. 9 excludes from copyright; journal articles, research reports and exchange rules are not, so follow each source's terms when quoting them. Full texts licensed through the National Central Library are for personal reading only and are never written to the cache.
 
-**Privacy and access limits**: the server only relays what the official sites publish, at the moment a user asks; it adds no masking of its own and keeps no database. Some appeal decisions (Executive Yuan cases filed up to ROC 108, Ministry of Justice decisions from before about ROC 112, the Council of Indigenous Peoples) are published with the parties' names unmasked and are returned as published. Only public, unauthenticated data is queried. Fresh browser sessions can complete JavaScript/Cloudflare checks and public-query captchas. Each request stays within the user’s query and selected full text; failed verification is reported as an error, never as zero results. No login, staff-only access or bulk collection is used. The Judicial Yuan sentencing system is used only for its public aggregate statistics; the per-judgment list that the site reserves for court staff is never called. See the [Disclaimer](#disclaimer) for the full terms.
+**Privacy and access limits**: the server only relays what the official sites publish, at the moment a user asks; it adds no masking of its own and keeps no database beyond the local query cache (see [Caching](#caching)). Some appeal decisions (Executive Yuan cases filed up to ROC 108, Ministry of Justice decisions from before about ROC 112, the Council of Indigenous Peoples) are published with the parties' names unmasked and are returned as published. Only public, unauthenticated data is queried. Fresh browser sessions can complete JavaScript/Cloudflare checks; sources that require passing a captcha are off by default and enabled only by the user. Each request stays within the user’s query and selected full text; failed verification is reported as an error, never as zero results. No login, staff-only access or bulk collection is used. The Judicial Yuan sentencing system is used only for its public aggregate statistics; the per-judgment list that the site reserves for court staff is never called. See the [Disclaimer](#disclaimer) for the full terms.
 
 **Judgment year coverage**: this server proxies the Judicial Yuan system live and has no database of its own, so effective coverage = whatever the Judicial Yuan holds. Measured (counting hits for keyword 「竊盜」): tens of thousands per year from ROC 89 (2000) onward, ~2,000 total for 81–88 (1992–1999), zero before 80 (1991). The Judicial Yuan states its open-data dump has "the same scope as the judgment search system", so no earlier public source exists. Expect empty or sparse results for pre-2000 queries.
 
@@ -1020,7 +1034,7 @@ Constitutional Court data source: [Judicial Yuan Constitutional Court](https://c
 
 **Unofficial.** This tool is not affiliated with, endorsed by, or authorized by the Judicial Yuan, the Ministry of Justice, or any Taiwan government agency.
 
-**This tool is a scraper.** Each time a user runs a query, it sends requests from the user's own machine to the official sites and extracts their web pages, PDFs, or the public APIs their front ends use. Some of these sites disallow crawlers in robots.txt; some present JavaScript / Cloudflare checks or image captchas, which the tool completes locally with a browser (Playwright) or OCR, or through the site's own voice-verification feature; where a site checks its captcha only in the browser, the tool submits the query form directly. All of this happens only for a single, user-initiated query: no login, no staff or privileged-user access, and no bulk download of documents. A few sites have no search function, so at query time the tool downloads the list they publish, matches it locally and caches it briefly. Apart from connecting to the Judicial Yuan judgment system when the server starts and refreshing the national regulation database's open-data code list once a week, the tool fetches nothing in the background and keeps no database.
+**This tool is a scraper.** Each time a user runs a query, it sends requests from the user's own machine to the official sites and extracts their web pages, PDFs, or the public APIs their front ends use. Some of these sites disallow crawlers in robots.txt; some present JavaScript / Cloudflare checks, which the tool completes locally with a browser (Playwright). Sources that require passing a captcha (Interior, Health and Welfare and Labor appeals and the medical discipline notices) are not queried by default; once the user enables them, the tool reads image captchas with local OCR, uses the site's own voice-verification feature, or, where a site checks its captcha only in the browser, submits the query form directly. All of this happens only for a single, user-initiated query: no login, no staff or privileged-user access, and no bulk download of documents. A few sites have no search function, so at query time the tool downloads the list they publish, matches it locally and caches it briefly. Apart from connecting to the Judicial Yuan judgment system when the server starts and refreshing the national regulation database's open-data code list once a week, the tool fetches nothing in the background and keeps no database.
 
 **Your responsibility.** Requests go out from your machine and network. You are responsible for checking and following each site's terms of use and the applicable law (including Taiwan's Copyright Act and Personal Data Protection Act), and for how you use the results. Do not modify or use this tool to scrape in bulk, at high frequency, or on an automated schedule, and do not build a database from or republish the results; sources that forbid republication (such as the SFI regulation system) and NCL-licensed full texts are for personal reading only.
 

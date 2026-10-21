@@ -210,6 +210,8 @@ async def main(argv: list[str]) -> int:
             for src in sources:
                 if source_filter and src not in source_filter:
                     continue
+                if tool == "decisions" and admin_decisions.captcha_off(src):  # 預設關閉；要檢查請設環境變數
+                    continue
                 kw = KEYWORDS.get((tool, src), default_kw)
                 read = _first_article if tool == "other_regulations" else (lambda c, i: c.get(i))
                 checks.append((tool, src, lambda c=client, s=src, k=kw, f=search: f(c, s, k),

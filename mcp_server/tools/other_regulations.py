@@ -382,10 +382,18 @@ _MOFA_EMPTY = dict.fromkeys(("tysubject_c", "tysubject_e", "tysubject_o", "tycou
                              "tykeyword", "tyclass"), "") | {"start": "Y", "Order": "Signing"}
 
 
+async def _mofa_fetch(http, url: str, **kwargs) -> httpx.Response:
+    """外交部主機偶爾讀到一半斷線（ReadError），同一個 GET 馬上重抓通常就好：只重試一次。"""
+    try:
+        return await http.get(url, **kwargs)
+    except httpx.TransportError:
+        return await http.get(url, **kwargs)
+
+
 async def _mofa_search(http, keyword: str, page: int) -> dict:
     country, kw = _split_country(keyword)
-    r = await http.get(MOFA_BASE + "Result.aspx",
-                       params=_MOFA_EMPTY | {"tykeyword": kw, "tycountry_c": country, "tycountry_e": country})
+    r = await _mofa_fetch(http, MOFA_BASE + "Result.aspx",
+                          params=_MOFA_EMPTY | {"tykeyword": kw, "tycountry_c": country, "tycountry_e": country})
     soup = _soup(r)
     if page > 1:  # 只能用「跳頁」postback 翻頁
         form = {i["name"]: i.get("value", "") for i in soup.select("input[type=hidden]") if i.get("name")}
@@ -417,7 +425,7 @@ async def _mofa_get(http, name: str) -> dict:
     if not m:
         raise LookupError(name)
     pdf_url = f"{MOFA_BASE}ShowPicOut.aspx?FileFolder={m.group(1)}&FileName={name}"
-    r = await http.get(pdf_url)
+    r = await _mofa_fetch(http, pdf_url)
     r.raise_for_status()
     if r.content[:4] != b"%PDF":
         raise LookupError(name)

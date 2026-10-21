@@ -60,13 +60,24 @@ claude mcp add taiwan-legal-db mcp-taiwan-legal-db --scope user
 
 接著 `/mcp` 重啟連線、Claude 就會在自然語言查詢時自動用 26 個 MCP tool。
 
-**Chromium**：司法院 WAF fallback，以及文化部訴願、NCC、雲林縣等需要瀏覽器的來源，會在第一次需要時自動下載安裝（約 150MB，僅一次）。無法連外下載的環境請預先安裝：
+**Chromium**：司法院 WAF（伺服器第一次啟動、還沒有 cookies 時就會用到，見[WAF 處理機制](#waf-處理機制)），以及文化部訴願、NCC、雲林縣等需要瀏覽器的來源，會在第一次需要時自動下載安裝（約 150MB，僅一次）。無法連外下載的環境請預先安裝：
 
 ```bash
 uvx --from mcp-taiwan-legal-db playwright install chromium    # 僅在查詢需要瀏覽器時啟動，平時 idle
 ```
 
-**驗證碼辨識**：內政部與衛福部訴願的圖形驗證碼需要本機 OCR 依賴，安裝時加上 `[captcha]`：`pip install "mcp-taiwan-legal-db[captcha]"`（uvx：`uvx --from "mcp-taiwan-legal-db[captcha]" mcp-taiwan-legal-db`；Claude Code plugin 已內含）。未安裝時這兩個來源會回報需要安裝，其餘來源不受影響。
+### 預設關閉的來源
+
+內政部、衛福部、勞動部訴願與醫事懲戒需要通過官網驗證碼，預設不查詢。啟用前請確認符合各網站的使用規定與相關法令，使用責任由使用者自行承擔。
+
+關閉時查到這些來源（例如 `source="內政部"`、`source="訴願"`），工具不連官網，只回「此來源預設關閉」和官網網址，請自行到官網查詢。要啟用，設定環境變數 `MCP_TAIWAN_LEGAL_DB_ENABLE_CAPTCHA_SOURCES=1` 後重新啟動；內政部、衛福部另外需要本機 OCR 依賴 `[captcha]`：
+
+```bash
+pip install "mcp-taiwan-legal-db[captcha]"
+claude mcp add taiwan-legal-db --scope user -e MCP_TAIWAN_LEGAL_DB_ENABLE_CAPTCHA_SOURCES=1 -- mcp-taiwan-legal-db
+```
+
+Claude Code plugin 不啟用這些來源，也不帶 `[captcha]`；要用請改照上面自行安裝。
 
 ---
 
@@ -496,7 +507,7 @@ search_administrative_decisions(keyword="違規停車", source="臺北市,新北
 get_administrative_decision("ey:A-115-000633")                             # 由 PDF 擷取全文
 ```
 
-官網公開的決定書照原樣提供：多數機關已遮蔽當事人姓名（○○），部分舊案（行政院 108 年以前收辦、法務部約 112 年以前）與原民會的決定書官網未遮蔽，本工具也不另外遮蔽。勞動部採公開語音驗證功能，內政部、衛福部採本機圖形 OCR（需 `[captcha]`）；文化部使用 Playwright。內政部／環境部未填年份時依官網查本年度；衛福部亦預設本年度。教育部／農業部限前五頁；基隆、中選會只查標題，人事總處只比對使用者指定的一頁。財政部、桃園目前連線失敗，臺南驗證仍未能穩定完成，未新增。律師懲戒決議的被付懲戒律師姓名是官方公開資訊。`source="醫事懲戒"` 查目前上架的醫事懲戒公告（預設西醫師，可用「牙醫師」等關鍵字前綴改類別），只比對姓名、縣市、證書字號；掃描決議只回傳 PDF。PDF 無法擷取文字時（多為 2008 年以前的公平會舊檔或掃描檔）回傳 `pdf_url` 讓使用者自行開啟。
+官網公開的決定書照原樣提供：多數機關已遮蔽當事人姓名（○○），部分舊案（行政院 108 年以前收辦、法務部約 112 年以前）與原民會的決定書官網未遮蔽，本工具也不另外遮蔽。內政部、衛福部、勞動部訴願與醫事懲戒預設關閉（見[預設關閉的來源](#預設關閉的來源)）；啟用後勞動部採公開語音驗證功能，內政部、衛福部採本機圖形 OCR（需 `[captcha]`）。文化部使用 Playwright。內政部／環境部未填年份時依官網查本年度；衛福部亦預設本年度。教育部／農業部限前五頁；基隆、中選會只查標題，人事總處只比對使用者指定的一頁。財政部、桃園目前連線失敗，臺南驗證仍未能穩定完成，未新增。律師懲戒決議的被付懲戒律師姓名是官方公開資訊。`source="醫事懲戒"` 查目前上架的醫事懲戒公告（預設西醫師，可用「牙醫師」等關鍵字前綴改類別），只比對姓名、縣市、證書字號；掃描決議只回傳 PDF。PDF 無法擷取文字時（多為 2008 年以前的公平會舊檔或掃描檔）回傳 `pdf_url` 讓使用者自行開啟。
 </details>
 
 <details>
@@ -754,8 +765,11 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 **「官網瀏覽器查詢逾時，可能仍停在驗證頁」「官網驗證尚未完成」**
 → 該官網的檢查這次沒有通過，稍後再試。這不代表查無資料。
 
+**「此來源預設關閉」**
+→ 這個來源需要通過官網驗證碼，預設不查詢，請到回應裡的官網網址自行查詢，或見[預設關閉的來源](#預設關閉的來源)。
+
 **「此公開來源需要本機 OCR」**
-→ 內政部、衛福部訴願需要 `[captcha]` 額外依賴：`pip install "mcp-taiwan-legal-db[captcha]"`。Claude Code plugin 已內含。
+→ 已啟用預設關閉的來源，但內政部、衛福部還缺 `[captcha]` 額外依賴：`pip install "mcp-taiwan-legal-db[captcha]"`。
 
 **`ssl.SSLCertVerificationError: ... Missing Subject Key Identifier`**
 → 這是 OpenSSL 3.6+ 對 TWCA Global Root CA 的廣泛 rejection，**不是 certifi 舊的問題**。本 repo 透過 [`truststore`](https://github.com/sethmlarson/truststore) 套件讓 Python 改用作業系統原生的 trust store（macOS Security framework、Windows CryptoAPI、Linux 系統 CA），**所有路徑都保留完整 SSL 驗證（`verify=True`）**，不使用 `verify=False`。這在 macOS、Windows 以及 OpenSSL <3.6 的 Linux 都能正常工作。OpenSSL 3.6+ 的 Linux 環境（Fedora 40+、未來的 Ubuntu LTS）目前可能仍有問題，歡迎 issue 回報。
@@ -768,10 +782,10 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 
 本專案採混合策略：
 
-- 預設用 httpx 直接請求（~0.25s）
-- 偵測到被擋（response 含 `Request Rejected` 或 JS challenge marker `bobcmn` / `TSPD`）自動 fallback 到 Playwright 跑一次 JS challenge
-- 取得 TSPD cookies 後持久化到使用者資料目錄的 `.judicial_cookies.json`（0600 權限）
-- 後續查詢繼續用 httpx 帶 cookies 執行
+- 伺服器啟動時，使用者資料目錄還沒有 `.judicial_cookies.json` 的話，會在背景先開一次 Playwright（缺 Chromium 時自動安裝），讓第一筆查詢不必等
+- Playwright 以 headless Chromium 開啟查詢頁，讓網站自己的 JS challenge 跑完，再取瀏覽器拿到的 cookies；不計算、不偽造 token
+- cookies 持久化到使用者資料目錄的 `.judicial_cookies.json`（0600 權限），之後的查詢用 httpx 帶這些 cookies 直接請求（~0.25s）；沒有設定期限，用到被擋為止
+- 偵測到被擋（response 含 `Request Rejected` 或 JS challenge marker `bobcmn` / `TSPD`）時重跑一次 Playwright，再重試一次
 
 `cons.judicial.gov.tw`（釋字）跟 `law.moj.gov.tw`（法規）沒這個問題，不經過 WAF 流程。
 
@@ -849,7 +863,7 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 
 `get_judgment` 接受使用者傳入的 URL，`mcp_server/config.py:ALLOWED_DOMAINS` 以硬編碼 allow-list 限制只能是裁判書與法規兩個網域；其他工具只連上表固定網址，不接受任意 URL。下列網站的 robots.txt 不允許爬蟲（或排除特定路徑），本工具對它們只做使用者觸發的單次查詢，不批次抓取：司法院法學資料檢索系統（legal.judicial.gov.tw）、衛福部法規檢索系統（mohwlaw.mohw.gov.tw）、行政院訴願網站（appeal.ey.gov.tw）、立法院議事暨公報資訊網（ppg.ly.gov.tw）、內政部地政司（www.land.moi.gov.tw）、臺北市法規查詢系統的訴願決定全文路徑（laws.gov.taipei）、全國法規資料庫的條約查詢（law.moj.gov.tw）、財政部的 `/download/` 檔案（www.mof.gov.tw）、行政院人事行政總處網站（www.dgpa.gov.tw）。證券暨期貨法令判解查詢系統（www.selaw.com.tw）載明非經授權不得轉載，櫃買中心、期交所規章只供查閱，結果都附提醒。函釋、決議、訴願決定、處分書等皆屬公文，依著作權法第 9 條不受著作權保護；期刊論文、研究報告與交易所規章則不在此列，請依各來源的使用規定引用。國家圖書館授權的全文只供個人查閱，本工具一律不寫入快取。
 
-**個資與存取限制**：本工具只在使用者查詢時即時轉取官網公開的內容，不另外遮蔽、也不建資料庫；部分訴願決定（行政院 108 年以前收辦、法務部約 112 年以前、原民會）官網未遮蔽當事人姓名，結果照原樣呈現。本工具只查公開、免登入資料；可在新的瀏覽器工作階段中處理 JavaScript／Cloudflare 檢查及公開查詢驗證碼。每次只完成使用者指定的查詢與全文讀取，驗證失敗會回報錯誤，不當成查無資料；不登入、不使用員工或院內權限、不批次抓取。司法院量刑資訊系統只用公開頁面的彙總統計，官網只開放給院內使用者的個案判決清單一律不呼叫。完整說明見[免責聲明](#免責聲明)。
+**個資與存取限制**：本工具只在使用者查詢時即時轉取官網公開的內容，不另外遮蔽；除了本機的查詢快取（見[快取](#快取)），不另建資料庫；部分訴願決定（行政院 108 年以前收辦、法務部約 112 年以前、原民會）官網未遮蔽當事人姓名，結果照原樣呈現。本工具只查公開、免登入資料；可在新的瀏覽器工作階段中處理 JavaScript／Cloudflare 檢查；需要通過驗證碼的來源預設關閉，由使用者自行啟用。每次只完成使用者指定的查詢與全文讀取，驗證失敗會回報錯誤，不當成查無資料；不登入、不使用員工或院內權限、不批次抓取。司法院量刑資訊系統只用公開頁面的彙總統計，官網只開放給院內使用者的個案判決清單一律不呼叫。完整說明見[免責聲明](#免責聲明)。
 
 **裁判書年份涵蓋範圍**：本工具即時代理司法院系統，沒有自己的資料庫，有效年份 = 司法院收錄範圍。實測（以「竊盜」為關鍵字計數）民國 89 年（2000）起每年數萬筆，81–88 年（1992–1999）合計約 2,000 筆，80 年（1991）以前為零。司法院公告其開放資料檔「收錄範圍與裁判書查詢系統相同」，因此沒有更早的公開來源。查詢 2000 年以前的裁判請預期查無或零星。
 
@@ -997,7 +1011,7 @@ Best-effort 維護 — 我們會盡量跟上 upstream（司法院、法務部）
 
 **非官方工具。** 本工具與司法院、法務部或任何政府機關沒有隸屬關係，也未經其授權或背書。
 
-**本工具是爬蟲。** 使用者每查詢一次，本工具就在使用者自己的電腦上向官網送出請求，擷取網頁、PDF 或網站前端使用的公開 API。部分網站的 robots.txt 不允許爬蟲；部分網站設有 JavaScript／Cloudflare 檢查或圖形驗證碼，本工具會在本機以瀏覽器（Playwright）或 OCR 完成，或使用網站提供的語音驗證功能；也有網站的驗證碼只在網頁前端檢查，本工具直接送出查詢表單。這些都只用於使用者觸發的單次查詢：不登入、不使用員工或特定使用者的權限、不批次下載文件全文。少數網站沒有搜尋功能，查詢時會下載它公開的清單，在本機比對並短期快取。除了伺服器啟動時預先連線司法院裁判書系統、每週更新一次全國法規資料庫開放資料的法規代碼表，本工具不在背景抓取資料，也不建立資料庫。
+**本工具是爬蟲。** 使用者每查詢一次，本工具就在使用者自己的電腦上向官網送出請求，擷取網頁、PDF 或網站前端使用的公開 API。部分網站的 robots.txt 不允許爬蟲；部分網站設有 JavaScript／Cloudflare 檢查，本工具會在本機以瀏覽器（Playwright）完成。需要通過驗證碼的來源（內政部、衛福部、勞動部訴願與醫事懲戒）預設不查詢；使用者自行啟用後，本工具會以本機 OCR 辨識圖形驗證碼、使用網站提供的語音驗證功能，或在驗證碼只於網頁前端檢查時直接送出查詢表單。這些都只用於使用者觸發的單次查詢：不登入、不使用員工或特定使用者的權限、不批次下載文件全文。少數網站沒有搜尋功能，查詢時會下載它公開的清單，在本機比對並短期快取。除了伺服器啟動時預先連線司法院裁判書系統、每週更新一次全國法規資料庫開放資料的法規代碼表，本工具不在背景抓取資料，也不建立資料庫。
 
 **使用者的責任。** 請求由使用者的電腦與網路發出。使用者須自行確認並遵守各網站的使用規定與相關法令（包括著作權法、個人資料保護法），並自行承擔使用的結果。請勿修改或使用本工具大量、高頻率或自動化地抓取資料，也不要把查詢結果建成資料庫或轉載；標示不得轉載的來源（如證基會法規系統）與國家圖書館授權全文只供個人查閱。
 

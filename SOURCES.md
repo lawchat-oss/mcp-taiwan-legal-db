@@ -1,6 +1,6 @@
 # Data Sources
 
-All data in this project is sourced from public databases run by Taiwan government agencies and public institutions. Everything except the bundled Constitutional Court corpus is fetched live, only when a user asks; nothing is bulk-downloaded.
+All data in this project is sourced from public databases run by Taiwan government agencies and public institutions. Everything except the bundled Constitutional Court corpus is fetched live, only when a user asks. A few published files are downloaded whole and refreshed on a schedule: the National Regulation Database open-data statute list (weekly), the official English translations (weekly), the National Land Management Agency interpretation list (weekly) and the TIPO copyright interpretations (daily); a few sites with no search function have their public list downloaded at query time and matched locally.
 
 ## 1. 司法院裁判書系統 / Judicial Judgments
 
@@ -88,7 +88,7 @@ All data in this project is sourced from public databases run by Taiwan governme
 
 ## 6. 訴願決定與準司法決定 / Administrative Appeals and Quasi-judicial Decisions
 
-官網公開的決定書照原樣提供：多數機關已遮蔽當事人姓名，部分舊案（行政院 108 年以前收辦、法務部約 112 年以前）與原民會的決定書官網未遮蔽，本工具不另外遮蔽。新增來源僅供使用者觸發的公開免登入查詢；必要時以全新 Playwright 工作階段、CSRF 表單或本機 OCR 完成驗證。沒有使用個人登入狀態，也不遍歷所有分頁。驗證未完成回報錯誤，不當成查無資料。內政部與衛福部需安裝 `[captcha]` 額外依賴；需要瀏覽器的來源（文化部訴願等）會在第一次使用時自動安裝 Chromium。
+官網公開的決定書照原樣提供：多數機關已遮蔽當事人姓名，部分舊案（行政院 108 年以前收辦、法務部約 112 年以前）與原民會的決定書官網未遮蔽，本工具不另外遮蔽。新增來源僅供使用者觸發的公開免登入查詢；必要時以全新 Playwright 工作階段、CSRF 表單或本機 OCR 完成驗證。沒有使用個人登入狀態，也不遍歷所有分頁。驗證未完成回報錯誤，不當成查無資料。內政部、衛福部、勞動部訴願與醫事懲戒需要通過官網驗證碼，預設不查詢，使用者設定 `MCP_TAIWAN_LEGAL_DB_ENABLE_CAPTCHA_SOURCES=1` 才啟用（見 README「預設關閉的來源」）；內政部與衛福部另需安裝 `[captcha]` 額外依賴；需要瀏覽器的來源（文化部訴願等）會在第一次使用時自動安裝 Chromium。
 
 ### 預設來源與準司法機關
 
@@ -104,7 +104,7 @@ All data in this project is sourced from public databases run by Taiwan governme
 | 金管會保險局 | https://www.ib.gov.tw/ch/home.jsp?id=42&parentpath=0,2 | 裁罰案件 |
 | 行政院公共工程委員會 | https://web.pcc.gov.tw/piat/piaq/index | 採購申訴審議判斷（須指定才查） |
 | 監察院 | https://www.cy.gov.tw/CyBsBox.aspx?CSN=1&n=133&sms=0 | 調查報告、糾正案、彈劾案、糾舉案（須指定才查） |
-| 衛福部醫事懲戒 | https://ma.mohw.gov.tw/Accessibility/DISSearch/MASearchDIS | 目前上架公告（預設西醫師）；公開表單無須前端驗證碼，只取官方主機 PDF；掃描檔沒有文字全文。須指定 `醫事懲戒` |
+| 衛福部醫事懲戒 | https://ma.mohw.gov.tw/Accessibility/DISSearch/MASearchDIS | 目前上架公告（預設西醫師）；公開表單無須前端驗證碼，只取官方主機 PDF；掃描檔沒有文字全文。須指定 `醫事懲戒`；預設關閉 |
 | 法務部律師查詢系統 | https://lawyerbc.moj.gov.tw/ | 律師懲戒、懲戒覆審決議（須指定才查） |
 
 ### 各部會訴願決定（須指定才查）
@@ -116,9 +116,9 @@ All data in this project is sourced from public databases run by Taiwan governme
 | 教育部 | https://appeal.moe.gov.tw/hope_search.aspx （WebForms；最近二年、最多前五頁，不支援年度篩選） |
 | 文化部 | https://appeal.moc.gov.tw/home/zh-tw/mocappeal （全新 Playwright 工作階段取得前端呼叫 themedata.culture.tw 公開 API 的回應；列表日期是刊登日；官網整串比對，一次只查一個詞） |
 | 環境部 | https://aamis-web.moenv.gov.tw/Search/Decision （公開 JSON 查詢；預設本年度，上限 300 筆） |
-| 勞動部 | https://appealweb.mol.gov.tw/Appeal/AppealCaseDecision （公開語音驗證回應；只查單一年度，列表日期是發文日） |
-| 內政部 | https://aarc.moi.gov.tw/Decision/ （本機 OCR 最多兩次；預設本年度、一次限一年度） |
-| 衛福部 | https://service.mohw.gov.tw/AppealSearch/ （本機 OCR 最多兩次；預設本年度、全文 ODT；無法區分驗證失敗的「查無資料」會回報錯誤） |
+| 勞動部 | https://appealweb.mol.gov.tw/Appeal/AppealCaseDecision （公開語音驗證回應；只查單一年度，列表日期是發文日；預設關閉） |
+| 內政部 | https://aarc.moi.gov.tw/Decision/ （本機 OCR 最多兩次；預設本年度、一次限一年度；預設關閉） |
+| 衛福部 | https://service.mohw.gov.tw/AppealSearch/ （本機 OCR 最多兩次；預設本年度、全文 ODT；無法區分驗證失敗的「查無資料」會回報錯誤；預設關閉） |
 | 中央選舉委員會 | https://web.cec.gov.tw/api/central/article/list （公開清單 API 分類 156，文章附 PDF；只比對標題，日期為刊登日） |
 | 人事行政總處 | https://www.dgpa.gov.tw/informationlist?uid=130 （只在指定一頁比對標題，總數是未篩選筆數；全文 ODT；robots.txt 不作排除，僅使用者觸發） |
 | 法務部 | https://www.moj.gov.tw/2204/2645/2686/Lpsimplelist |

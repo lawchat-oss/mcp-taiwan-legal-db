@@ -487,3 +487,47 @@ async def test_browser_sources_install_missing_chromium_once(monkeypatch):
     monkeypatch.setattr(public_browser, "_install_chromium", lambda: True)
     p = SimpleNamespace(chromium=SimpleNamespace(launch=launch))
     assert await public_browser._launch(p, Missing) == "browser" and len(calls) == 2
+
+
+async def test_captcha_sources_are_off_by_default(monkeypatch, tmp_path):
+    from mcp_server import config
+    from mcp_server.cache.db import CacheDB
+    from mcp_server.tools import admin_decisions as ad
+
+    called = []
+
+    async def search(http, *args):
+        called.append(args)
+        return {"source": "x", "total": 1, "items": [{"id": "1", "date": "2026-01-01"}]}
+
+    async def get(http, native_id):
+        called.append(native_id)
+        return {"full_text": "本文"}
+
+    monkeypatch.setattr(ad, "SOURCES", {k: (label, aliases, search, get) for k, (label, aliases, *_) in ad.SOURCES.items()})
+    assert set(ad.CAPTCHA_SOURCES).isdisjoint(ad.DEFAULT_SOURCES)
+    cache = CacheDB(db_path=tmp_path / "c.db")
+    await cache.initialize()
+    client = ad.AdminDecisionClient(cache)
+    try:
+        monkeypatch.setattr(config, "ENABLE_CAPTCHA_SOURCES", False)
+        r = await client.search("土地", "訴願", 0, 0, "", 1)  # 「訴願」一次查全部訴願來源
+        off = {g["source"]: g for g in r["categories"] if g.get("disabled")}
+        assert set(off) == {"內政部訴願決定", "衛福部訴願決定", "勞動部訴願決定"}
+        assert all(g["total"] == 0 and g["source_url"].startswith("https://") and ad.CAPTCHA_NOTICE in g["note"]
+                   for g in off.values())
+        assert len(called) == len(ad.resolve_sources("訴願")) - len(off)  # 關閉的來源完全不連線
+        called.clear()
+        r = await client.search("王", "醫事懲戒", 0, 0, "", 1)
+        assert r["categories"][0]["disabled"] and not called
+        d = await client.get("mol:123")
+        assert not d["success"] and "預設關閉" in d["error"] and d["source_url"].endswith("AppealCaseDecision")
+        assert not called
+
+        monkeypatch.setattr(config, "ENABLE_CAPTCHA_SOURCES", True)
+        r = await client.search("王", "醫事懲戒", 0, 0, "", 1)  # 開關不同不共用快取
+        assert called and r["categories"][0]["notice"] == ad.CAPTCHA_NOTICE
+        assert (await client.get("mol:123"))["notice"] == ad.CAPTCHA_NOTICE
+    finally:
+        await client.close()
+        await cache.close()
